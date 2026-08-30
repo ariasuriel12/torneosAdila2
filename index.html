@@ -1,0 +1,955 @@
+<!DOCTYPE html>
+<html lang="es-AR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=3.0">
+<title>Torneos Adila</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<style>
+  :root{
+    --verde: #1E4A34;
+    --verde-claro: #2F6B4A;
+    --verde-oscuro: #12301F;
+    --tiza: #F7F5EF;
+    --dorado: #C9972E;
+    --dorado-claro: #E4C77A;
+    --tinta: #182019;
+    --rojo: #A8402E;
+    --linea: #D8D3C4;
+    --blanco: #FFFFFF;
+  }
+  *{box-sizing:border-box;}
+  html{-webkit-text-size-adjust:100%;}
+  body{
+    margin:0;
+    background:var(--tiza);
+    color:var(--tinta);
+    font-family:'Inter',system-ui,-apple-system,sans-serif;
+    font-size:18px;
+    line-height:1.45;
+    min-height:100vh;
+  }
+  h1,h2,h3,.display{
+    font-family:'Anton','Impact',sans-serif;
+    font-weight:400;
+    letter-spacing:0.02em;
+    text-transform:uppercase;
+    color:var(--verde-oscuro);
+  }
+  button, input, select{ font-family:inherit; font-size:1rem; }
+  button{ cursor:pointer; }
+  button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible{
+    outline:3px solid var(--dorado); outline-offset:2px;
+  }
+  a{ color:inherit; }
+  .wrap{ max-width:820px; margin:0 auto; padding:0 16px 56px; }
+
+  /* ---------- Topbar ---------- */
+  .topbar{
+    background:linear-gradient(135deg,var(--verde) 0%,var(--verde-oscuro) 100%);
+    color:var(--tiza);
+    padding:14px 16px;
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    box-shadow:0 3px 10px rgba(0,0,0,.18);
+    position:sticky; top:0; z-index:50;
+  }
+  .topbar-left{ display:flex; align-items:center; gap:10px; min-width:0; }
+  .back-btn{
+    background:rgba(255,255,255,.14); border:none; color:var(--tiza);
+    width:44px; height:44px; border-radius:12px; font-size:1.3rem;
+    display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  }
+  .topbar-title{
+    font-family:'Anton',sans-serif; font-size:1.15rem; letter-spacing:.03em;
+    text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .admin-pill{
+    display:flex; align-items:center; gap:8px; background:rgba(255,255,255,.14);
+    border:none; color:var(--tiza); padding:10px 14px; border-radius:999px;
+    font-weight:700; font-size:.95rem; white-space:nowrap;
+  }
+  .admin-pill.on{ background:var(--dorado); color:var(--verde-oscuro); }
+
+  /* ---------- Hero / Home ---------- */
+  .hero{
+    background:
+      repeating-linear-gradient(0deg, rgba(255,255,255,.035) 0 40px, transparent 40px 80px),
+      linear-gradient(160deg,var(--verde) 0%, var(--verde-oscuro) 100%);
+    color:var(--tiza); padding:40px 16px 46px; text-align:center;
+  }
+  .hero h1{ color:var(--tiza); font-size:2.4rem; margin:0 0 6px; }
+  .hero p{ color:var(--dorado-claro); font-size:1.05rem; margin:0; font-weight:600; }
+  .torneo-grid{
+    display:grid; grid-template-columns:1fr 1fr; gap:16px;
+    max-width:820px; margin:-26px auto 0; padding:0 16px; position:relative;
+  }
+  @media (max-width:560px){ .torneo-grid{ grid-template-columns:1fr; } }
+  .torneo-card{
+    background:var(--blanco); border:none; border-radius:18px; padding:26px 16px;
+    box-shadow:0 10px 24px rgba(18,48,31,.18); display:flex; flex-direction:column;
+    align-items:center; gap:12px; text-align:center; transition:transform .15s;
+  }
+  .torneo-card:active{ transform:scale(.98); }
+  .crest-slot{
+    width:74px; height:74px; border-radius:50%; background:var(--tiza);
+    border:3px solid var(--dorado); display:flex; align-items:center; justify-content:center;
+    font-size:2rem; overflow:hidden;
+  }
+  .crest-slot img{ width:100%; height:100%; object-fit:cover; }
+  .torneo-card-name{ font-family:'Anton',sans-serif; font-size:1.25rem; color:var(--verde-oscuro); }
+  .torneo-card-sub{ color:#6b6659; font-size:.92rem; font-weight:600; margin-top:-6px; }
+
+  /* ---------- Generic sections ---------- */
+  .section{ padding:24px 0 4px; }
+  .section-title{ font-size:1.3rem; margin:0 0 14px; }
+  .zona-grid{ display:grid; gap:14px; }
+  .zona-btn{
+    background:var(--blanco); border:2px solid var(--linea); border-radius:14px;
+    padding:18px 20px; text-align:left; display:flex; align-items:center; justify-content:space-between;
+    font-weight:700; color:var(--verde-oscuro); font-size:1.1rem;
+  }
+  .zona-btn .tag{ background:var(--verde); color:var(--tiza); font-size:.8rem; padding:5px 10px; border-radius:999px; font-weight:700; }
+
+  /* ---------- Tabs ---------- */
+  .tabs{ display:flex; gap:8px; margin:18px 0 18px; flex-wrap:wrap; }
+  .tab-btn{
+    flex:1; min-width:120px; background:var(--blanco); border:2px solid var(--linea); color:var(--verde-oscuro);
+    padding:12px 10px; border-radius:12px; font-weight:800; font-size:.95rem;
+  }
+  .tab-btn.active{ background:var(--verde); border-color:var(--verde); color:var(--tiza); }
+
+  /* ---------- Buttons ---------- */
+  .btn{
+    display:inline-flex; align-items:center; justify-content:center; gap:8px;
+    min-height:48px; padding:10px 18px; border-radius:12px; border:2px solid transparent;
+    font-weight:800; font-size:1rem;
+  }
+  .btn-primary{ background:var(--verde); color:var(--tiza); }
+  .btn-gold{ background:var(--dorado); color:var(--verde-oscuro); }
+  .btn-outline{ background:var(--blanco); color:var(--verde-oscuro); border-color:var(--verde); }
+  .btn-danger{ background:var(--blanco); color:var(--rojo); border-color:var(--rojo); }
+  .btn-block{ width:100%; }
+  .btn-row{ display:flex; gap:10px; flex-wrap:wrap; }
+  .btn:disabled{ opacity:.5; }
+
+  /* ---------- Tabla de posiciones ---------- */
+  .table-scroll{ overflow-x:auto; border-radius:14px; box-shadow:0 4px 14px rgba(18,48,31,.1); }
+  table.tabla{ border-collapse:collapse; width:100%; min-width:600px; background:var(--blanco); }
+  table.tabla th, table.tabla td{ padding:11px 10px; text-align:center; border-bottom:1px solid var(--linea); white-space:nowrap; }
+  table.tabla thead th{ background:var(--verde); color:var(--tiza); font-size:.82rem; text-transform:uppercase; letter-spacing:.03em; position:sticky; top:0; }
+  table.tabla tbody tr:nth-child(odd){ background:#FBFAF6; }
+  table.tabla td.equipo-cell{ text-align:left; font-weight:700; position:sticky; left:0; background:inherit; min-width:170px; }
+  table.tabla thead th:first-child, table.tabla thead th.equipo-cell{ position:sticky; left:0; z-index:2; }
+  .equipo-cell-inner{ display:flex; align-items:center; gap:9px; }
+  .crest-sm{ width:28px; height:28px; border-radius:50%; object-fit:cover; background:var(--tiza); border:1px solid var(--linea); flex-shrink:0; }
+  .crest-sm-ph{ width:28px; height:28px; border-radius:50%; background:var(--tiza); border:1px solid var(--linea); flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:.8rem; }
+  table.tabla td.pts-cell{ font-weight:800; color:var(--verde-oscuro); background:#FBF3DE; }
+  table.tabla tbody tr:first-child td{ background:#FDF6E3; }
+  table.tabla tbody tr:first-child td.equipo-cell{ background:#FDF6E3; }
+  .empty-note{ color:#7a7566; font-size:.95rem; padding:14px 2px; }
+
+  .download-row{ display:flex; gap:10px; margin:16px 0 6px; flex-wrap:wrap; }
+
+  /* ---------- Fecha chips ---------- */
+  .fecha-row{ display:flex; gap:8px; overflow-x:auto; padding:4px 2px 12px; }
+  .fecha-chip{
+    flex-shrink:0; background:var(--blanco); border:2px solid var(--linea); color:var(--verde-oscuro);
+    padding:10px 16px; border-radius:999px; font-weight:800; white-space:nowrap;
+  }
+  .fecha-chip.active{ background:var(--dorado); border-color:var(--dorado); color:var(--verde-oscuro); }
+
+  /* ---------- Match / scoreboard card ---------- */
+  .match-card{
+    background:var(--verde-oscuro); border-radius:16px; padding:16px; margin-bottom:14px;
+    box-shadow:0 6px 16px rgba(18,48,31,.22); color:var(--tiza);
+  }
+  .match-teams{ display:grid; grid-template-columns:1fr auto 1fr; align-items:center; gap:8px; }
+  .match-team{ display:flex; flex-direction:column; align-items:center; gap:8px; text-align:center; min-width:0; }
+  .match-team .crest-md{ width:52px; height:52px; border-radius:50%; object-fit:cover; background:var(--tiza); border:2px solid var(--dorado); }
+  .match-team .crest-md-ph{ width:52px; height:52px; border-radius:50%; background:rgba(255,255,255,.1); border:2px solid var(--dorado); display:flex; align-items:center; justify-content:center; font-size:1.4rem; }
+  .match-team-name{ font-weight:800; font-size:.92rem; }
+  .score-box{
+    display:flex; align-items:center; gap:10px; justify-content:center;
+  }
+  .score-num{
+    font-family:'Anton',sans-serif; font-size:2.1rem; background:var(--tinta); color:var(--dorado-claro);
+    border-radius:8px; padding:2px 6px; min-width:46px; text-align:center;
+  }
+  .vs-label{ font-family:'Anton',sans-serif; color:var(--dorado); font-size:1rem; }
+  .pendiente-label{ font-family:'Anton',sans-serif; color:rgba(255,255,255,.55); font-size:.95rem; letter-spacing:.05em; }
+
+  .score-editor{ display:flex; align-items:center; justify-content:center; gap:6px; margin-top:4px; }
+  .step-btn{
+    width:38px; height:38px; border-radius:10px; border:none; background:rgba(255,255,255,.14); color:var(--tiza);
+    font-size:1.3rem; font-weight:800; display:flex; align-items:center; justify-content:center;
+  }
+  .step-input{
+    width:52px; text-align:center; border:none; border-radius:8px; height:38px; font-size:1.2rem; font-weight:800;
+  }
+  .match-admin-row{ display:flex; align-items:center; justify-content:space-between; margin-top:14px; gap:10px; flex-wrap:wrap; border-top:1px solid rgba(255,255,255,.15); padding-top:12px; }
+  .jugado-check{ display:flex; align-items:center; gap:8px; font-weight:700; font-size:.9rem; }
+  .jugado-check input{ width:22px; height:22px; }
+  .libre-card{
+    background:var(--dorado); color:var(--verde-oscuro); border-radius:16px; padding:16px; margin-bottom:14px;
+    display:flex; align-items:center; gap:12px; font-weight:800;
+  }
+
+  /* ---------- Forms ---------- */
+  .card{ background:var(--blanco); border:2px solid var(--linea); border-radius:16px; padding:18px; margin-bottom:16px; }
+  .card-admin{ border-color:var(--dorado); }
+  .card-title{ font-weight:800; font-size:1.02rem; margin:0 0 12px; display:flex; align-items:center; gap:8px; color:var(--verde-oscuro); }
+  .field{ margin-bottom:14px; }
+  .field label{ display:block; font-weight:700; margin-bottom:6px; font-size:.92rem; color:#4a473d; }
+  .field input[type=text], .field select, .field input[type=number]{
+    width:100%; padding:12px 12px; border-radius:10px; border:2px solid var(--linea); background:var(--tiza); min-height:48px;
+  }
+  .file-btn{
+    display:inline-flex; align-items:center; gap:8px; background:var(--tiza); border:2px dashed var(--verde);
+    padding:12px 16px; border-radius:10px; font-weight:700; color:var(--verde-oscuro); width:100%; justify-content:center;
+  }
+  .file-btn input{ display:none; }
+  .equipo-row{ display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:1px solid var(--linea); }
+  .equipo-row:last-child{ border-bottom:none; }
+  .equipo-row .nombre{ flex:1; font-weight:700; min-width:0; }
+  .equipo-row .crest-md-sm{ width:40px; height:40px; border-radius:50%; object-fit:cover; background:var(--tiza); border:1px solid var(--linea); flex-shrink:0; }
+
+  .login-box{ background:var(--verde-oscuro); color:var(--tiza); border-radius:16px; padding:22px; text-align:center; margin:18px 0; }
+  .login-box p{ color:#d9d5c6; }
+
+  .toast{
+    position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
+    background:var(--verde-oscuro); color:var(--tiza); padding:14px 22px; border-radius:12px;
+    font-weight:800; box-shadow:0 8px 20px rgba(0,0,0,.3); z-index:200; max-width:90%; text-align:center;
+  }
+  .loader-note{ text-align:center; padding:40px 10px; color:#6b6659; font-weight:700; }
+
+  /* export-only styling, rendered off-screen */
+  #exportHolder{ position:fixed; left:-9999px; top:0; }
+  .export-card{ width:720px; background:var(--tiza); font-family:'Inter',sans-serif; padding:28px; }
+  .export-header{ display:flex; align-items:center; gap:16px; margin-bottom:18px; border-bottom:4px solid var(--dorado); padding-bottom:14px; }
+  .export-logo{ width:64px; height:64px; border-radius:50%; object-fit:cover; border:3px solid var(--verde); }
+  .export-torneo{ font-family:'Anton',sans-serif; font-size:1.5rem; color:var(--verde-oscuro); text-transform:uppercase; }
+  .export-zona{ font-weight:700; color:var(--dorado); }
+  table.export-table{ width:100%; border-collapse:collapse; }
+  table.export-table th{ background:var(--verde); color:var(--tiza); padding:10px 8px; font-size:.78rem; text-transform:uppercase; }
+  table.export-table td{ padding:9px 8px; text-align:center; border-bottom:1px solid var(--linea); font-weight:600; }
+  table.export-table tr.lider td{ background:#FDF0C6; }
+  .export-equipo{ display:flex; align-items:center; gap:8px; text-align:left; font-weight:800; }
+  .export-equipo img{ width:26px; height:26px; border-radius:50%; object-fit:cover; }
+  td.pts{ font-weight:800; color:var(--verde-oscuro); }
+  .export-footer{ text-align:center; margin-top:16px; color:#8a8574; font-size:.85rem; font-weight:600; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="exportHolder"></div>
+
+<script>
+/* =======================================================================
+   CONFIGURACIÓN DE TORNEOS
+   ======================================================================= */
+const TORNEOS = {
+  veteranos50: {
+    id:'veteranos50',
+    nombre:'Torneo Veteranos +50',
+    zonas:[ { id:'unica', nombre:'Zona Única', esperados:null } ]
+  },
+  masCuarenta: {
+    id:'masCuarenta',
+    nombre:'Torneo +40',
+    zonas:[
+      { id:'a', nombre:'Zona A', esperados:8 },
+      { id:'b', nombre:'Zona B', esperados:9 }
+    ]
+  }
+};
+const ADMIN_PASSWORD = 'adila2026';
+
+/* =======================================================================
+   FIREBASE (guardado real y compartido, para cuando la página vive en GitHub)
+   ======================================================================= */
+const firebaseConfig = {
+  apiKey: "AIzaSyAULw31PlNW07zg4G8XhVWlTngSiTjdXVQ",
+  authDomain: "torneosadila2.firebaseapp.com",
+  projectId: "torneosadila2",
+  storageBucket: "torneosadila2.firebasestorage.app",
+  messagingSenderId: "997767741356",
+  appId: "1:997767741356:web:79cb30fe0721be6e370409"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const COLECCION = 'torneosAdila';
+
+/* =======================================================================
+   ESTADO EN MEMORIA
+   ======================================================================= */
+const state = {
+  view:'home',          // home | zonaSelect | torneo
+  torneoId:null,
+  zonaId:null,
+  subview:'tabla',       // tabla | fixture | equipos
+  fechaActual:null,
+  admin:false,
+  cache:{},              // cache["torneoId-zonaId"] = { equipos:[...], fechas:[...] }
+  logos:{},              // logos[torneoId] = dataURL
+  loadingZona:false,
+  toast:null,
+  exporting:false
+};
+
+/* =======================================================================
+   UTILIDADES
+   ======================================================================= */
+function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+function escapeHtml(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function showToast(msg){
+  state.toast = msg;
+  render();
+  setTimeout(()=>{ state.toast=null; render(); }, 1800);
+}
+function resizeImageToDataURL(file, maxDim){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = (e)=>{
+      const img = new Image();
+      img.onload = ()=>{
+        let w = img.width, h = img.height;
+        if(w>h){ if(w>maxDim){ h = Math.round(h*maxDim/w); w = maxDim; } }
+        else { if(h>maxDim){ w = Math.round(w*maxDim/h); h = maxDim; } }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0,0,w,h);
+        ctx.drawImage(img,0,0,w,h);
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.onerror = ()=>reject(new Error('imagen invalida'));
+      img.src = e.target.result;
+    };
+    reader.onerror = ()=>reject(new Error('lectura fallida'));
+    reader.readAsDataURL(file);
+  });
+}
+
+/* =======================================================================
+   ALMACENAMIENTO (persistente y compartido entre todos los visitantes,
+   guardado en Firebase para que funcione alojado en GitHub Pages)
+   ======================================================================= */
+async function storageGet(key){
+  try{
+    const doc = await db.collection(COLECCION).doc(key).get();
+    return doc.exists ? doc.data().value : null;
+  }catch(e){ console.error('Error leyendo', key, e); return null; }
+}
+async function storageSet(key, value){
+  try{
+    await db.collection(COLECCION).doc(key).set({ value });
+    return true;
+  }catch(e){ console.error('Error guardando', key, e); return false; }
+}
+async function getEquipos(torneoId, zonaId){
+  const v = await storageGet(`equipos-${torneoId}-${zonaId}`);
+  return v ? JSON.parse(v) : [];
+}
+async function saveEquipos(torneoId, zonaId, arr){
+  await storageSet(`equipos-${torneoId}-${zonaId}`, JSON.stringify(arr));
+}
+async function getFechas(torneoId, zonaId){
+  const v = await storageGet(`fechas-${torneoId}-${zonaId}`);
+  return v ? JSON.parse(v) : [];
+}
+async function saveFechas(torneoId, zonaId, arr){
+  await storageSet(`fechas-${torneoId}-${zonaId}`, JSON.stringify(arr));
+}
+async function getLogo(torneoId){
+  return await storageGet(`logo-${torneoId}`);
+}
+async function saveLogo(torneoId, dataUrl){
+  await storageSet(`logo-${torneoId}`, dataUrl);
+}
+
+function cacheKey(t,z){ return t+'-'+z; }
+async function ensureZonaData(torneoId, zonaId){
+  const key = cacheKey(torneoId, zonaId);
+  if(!state.cache[key]){
+    state.loadingZona = true; render();
+    const [equipos, fechas] = await Promise.all([getEquipos(torneoId,zonaId), getFechas(torneoId,zonaId)]);
+    state.cache[key] = { equipos, fechas };
+    state.loadingZona = false;
+  }
+}
+function getCache(){ return state.cache[cacheKey(state.torneoId, state.zonaId)]; }
+
+/* =======================================================================
+   CÁLCULO DE TABLA DE POSICIONES
+   ======================================================================= */
+function computeTabla(equipos, fechas){
+  const stats = {};
+  equipos.forEach(e=>{ stats[e.id] = { id:e.id, nombre:e.nombre, escudo:e.escudo||null, pj:0,pg:0,pe:0,pp:0,gf:0,gc:0,pts:0 }; });
+  fechas.forEach(f=>{
+    (f.partidos||[]).forEach(p=>{
+      if(!p.jugado) return;
+      const l = stats[p.localId], v = stats[p.visitanteId];
+      if(!l || !v) return;
+      const gl = Number(p.golesLocal)||0, gv = Number(p.golesVisitante)||0;
+      l.pj++; v.pj++; l.gf+=gl; l.gc+=gv; v.gf+=gv; v.gc+=gl;
+      if(gl>gv){ l.pg++; l.pts+=3; v.pp++; }
+      else if(gl<gv){ v.pg++; v.pts+=3; l.pp++; }
+      else { l.pe++; v.pe++; l.pts+=1; v.pts+=1; }
+    });
+  });
+  const arr = Object.values(stats);
+  arr.sort((a,b)=> b.pts-a.pts || (b.gf-b.gc)-(a.gf-a.gc) || b.gf-a.gf || a.nombre.localeCompare(b.nombre,'es'));
+  return arr;
+}
+
+/* =======================================================================
+   NAVEGACIÓN
+   ======================================================================= */
+function goHome(){ state.view='home'; state.torneoId=null; state.zonaId=null; render(); }
+function goTorneo(torneoId){
+  const t = TORNEOS[torneoId];
+  if(t.zonas.length>1){ state.view='zonaSelect'; state.torneoId=torneoId; render(); }
+  else { enterZona(torneoId, t.zonas[0].id); }
+}
+async function enterZona(torneoId, zonaId){
+  state.torneoId=torneoId; state.zonaId=zonaId; state.view='torneo'; state.subview='tabla'; state.fechaActual=null;
+  await ensureZonaData(torneoId, zonaId);
+  const c = getCache();
+  if(c && c.fechas.length){ state.fechaActual = c.fechas[c.fechas.length-1].numero; }
+  render();
+}
+function setSubview(v){ state.subview=v; if(v==='fixture'){ const c=getCache(); if(c && c.fechas.length && state.fechaActual==null){ state.fechaActual = c.fechas[c.fechas.length-1].numero; } } render(); }
+
+/* =======================================================================
+   ADMIN
+   ======================================================================= */
+function adminLogin(){
+  const pass = prompt('Ingresá la contraseña de administrador:');
+  if(pass==null) return;
+  if(pass === ADMIN_PASSWORD){ state.admin = true; render(); showToast('Modo administrador activado ✔'); }
+  else { alert('Contraseña incorrecta.'); }
+}
+function adminLogout(){
+  if(confirm('¿Cerrar la sesión de administrador?')){ state.admin=false; render(); }
+}
+
+/* =======================================================================
+   GESTIÓN DE EQUIPOS
+   ======================================================================= */
+async function addEquipo(){
+  const input = document.getElementById('nuevoEquipoNombre');
+  const nombre = input.value.trim();
+  if(!nombre){ alert('Escribí el nombre del equipo.'); return; }
+  const c = getCache();
+  c.equipos.push({ id:uid(), nombre, escudo:null });
+  await saveEquipos(state.torneoId, state.zonaId, c.equipos);
+  input.value='';
+  render();
+  showToast('Equipo agregado ✔');
+}
+async function eliminarEquipo(equipoId){
+  if(!confirm('¿Eliminar este equipo? También se perderán sus partidos cargados.')) return;
+  const c = getCache();
+  c.equipos = c.equipos.filter(e=>e.id!==equipoId);
+  c.fechas.forEach(f=>{
+    f.partidos = (f.partidos||[]).filter(p=>p.localId!==equipoId && p.visitanteId!==equipoId);
+    if(f.libreId===equipoId) f.libreId=null;
+  });
+  await Promise.all([saveEquipos(state.torneoId, state.zonaId, c.equipos), saveFechas(state.torneoId, state.zonaId, c.fechas)]);
+  render();
+  showToast('Equipo eliminado');
+}
+async function onEscudoEquipoChange(equipoId, inputEl){
+  const file = inputEl.files[0]; if(!file) return;
+  try{
+    const dataUrl = await resizeImageToDataURL(file, 220);
+    const c = getCache();
+    const eq = c.equipos.find(e=>e.id===equipoId);
+    if(eq){ eq.escudo = dataUrl; await saveEquipos(state.torneoId, state.zonaId, c.equipos); render(); showToast('Escudo actualizado ✔'); }
+  }catch(err){ alert('No se pudo cargar la imagen. Probá con otra foto.'); }
+}
+async function onLogoTorneoChange(inputEl){
+  const file = inputEl.files[0]; if(!file) return;
+  try{
+    const dataUrl = await resizeImageToDataURL(file, 260);
+    state.logos[state.torneoId] = dataUrl;
+    await saveLogo(state.torneoId, dataUrl);
+    render();
+    showToast('Logo del torneo actualizado ✔');
+  }catch(err){ alert('No se pudo cargar la imagen. Probá con otra foto.'); }
+}
+
+/* =======================================================================
+   GESTIÓN DE FECHAS Y PARTIDOS
+   ======================================================================= */
+function nuevaFecha(){
+  const c = getCache();
+  const max = c.fechas.reduce((m,f)=>Math.max(m,f.numero),0);
+  const numero = max+1;
+  c.fechas.push({ numero, libreId:null, partidos:[] });
+  saveFechas(state.torneoId, state.zonaId, c.fechas);
+  state.fechaActual = numero;
+  render();
+}
+function irAFecha(n){ state.fechaActual = n; render(); }
+function equiposDisponiblesEnFecha(fecha, excluirPartidoId){
+  const c = getCache();
+  const usados = new Set();
+  (fecha.partidos||[]).forEach(p=>{ if(p.id!==excluirPartidoId){ usados.add(p.localId); usados.add(p.visitanteId); } });
+  if(fecha.libreId) usados.add(fecha.libreId);
+  return c.equipos.filter(e=>!usados.has(e.id));
+}
+async function agregarPartido(){
+  const c = getCache();
+  const fecha = c.fechas.find(f=>f.numero===state.fechaActual);
+  if(!fecha) return;
+  const localId = document.getElementById('selLocal').value;
+  const visitanteId = document.getElementById('selVisitante').value;
+  if(!localId || !visitanteId){ alert('Elegí ambos equipos.'); return; }
+  if(localId===visitanteId){ alert('Un equipo no puede jugar contra sí mismo.'); return; }
+  fecha.partidos = fecha.partidos || [];
+  fecha.partidos.push({ id:uid(), localId, visitanteId, golesLocal:0, golesVisitante:0, jugado:false });
+  await saveFechas(state.torneoId, state.zonaId, c.fechas);
+  render();
+  showToast('Partido agregado ✔');
+}
+async function eliminarPartido(partidoId){
+  if(!confirm('¿Eliminar este partido?')) return;
+  const c = getCache();
+  const fecha = c.fechas.find(f=>f.numero===state.fechaActual);
+  fecha.partidos = fecha.partidos.filter(p=>p.id!==partidoId);
+  await saveFechas(state.torneoId, state.zonaId, c.fechas);
+  render();
+}
+async function guardarResultado(partidoId){
+  const c = getCache();
+  const fecha = c.fechas.find(f=>f.numero===state.fechaActual);
+  const p = fecha.partidos.find(x=>x.id===partidoId);
+  const gl = document.getElementById('gl-'+partidoId).value;
+  const gv = document.getElementById('gv-'+partidoId).value;
+  const jugado = document.getElementById('jg-'+partidoId).checked;
+  p.golesLocal = Math.max(0, parseInt(gl,10)||0);
+  p.golesVisitante = Math.max(0, parseInt(gv,10)||0);
+  p.jugado = jugado;
+  await saveFechas(state.torneoId, state.zonaId, c.fechas);
+  render();
+  showToast('Resultado guardado ✔');
+}
+function stepScore(partidoId, campo, delta){
+  const el = document.getElementById(campo+'-'+partidoId);
+  const val = Math.max(0, (parseInt(el.value,10)||0)+delta);
+  el.value = val;
+}
+async function setLibre(equipoId){
+  const c = getCache();
+  const fecha = c.fechas.find(f=>f.numero===state.fechaActual);
+  fecha.libreId = equipoId || null;
+  await saveFechas(state.torneoId, state.zonaId, c.fechas);
+  render();
+  showToast(equipoId ? 'Equipo libre asignado ✔' : 'Fecha libre quitada');
+}
+async function eliminarFecha(){
+  if(!confirm('¿Eliminar esta fecha completa junto con sus partidos cargados?')) return;
+  const c = getCache();
+  c.fechas = c.fechas.filter(f=>f.numero!==state.fechaActual);
+  await saveFechas(state.torneoId, state.zonaId, c.fechas);
+  state.fechaActual = c.fechas.length ? c.fechas[c.fechas.length-1].numero : null;
+  render();
+}
+
+/* =======================================================================
+   DESCARGA DE TABLA (imagen / PDF)
+   ======================================================================= */
+function buildExportHTML(torneo, zona, tabla){
+  const logo = state.logos[torneo.id];
+  const fecha = new Date().toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
+  const filas = tabla.map((e,i)=>`
+    <tr class="${i===0?'lider':''}">
+      <td>${i+1}</td>
+      <td class="export-equipo">${e.escudo?`<img src="${e.escudo}">`:''}<span>${escapeHtml(e.nombre)}</span></td>
+      <td>${e.pj}</td><td>${e.pg}</td><td>${e.pe}</td><td>${e.pp}</td>
+      <td>${e.gf}</td><td>${e.gc}</td><td>${e.gf-e.gc}</td>
+      <td class="pts">${e.pts}</td>
+    </tr>`).join('');
+  return `<div class="export-card">
+    <div class="export-header">
+      ${logo?`<img class="export-logo" src="${logo}">`:''}
+      <div>
+        <div class="export-torneo">${escapeHtml(torneo.nombre)}</div>
+        <div class="export-zona">${escapeHtml(zona.nombre)}</div>
+      </div>
+    </div>
+    <table class="export-table">
+      <thead><tr><th>#</th><th>Equipo</th><th>PJ</th><th>PG</th><th>PE</th><th>PP</th><th>GF</th><th>GC</th><th>DIF</th><th>PTS</th></tr></thead>
+      <tbody>${filas || '<tr><td colspan="10">Sin equipos cargados</td></tr>'}</tbody>
+    </table>
+    <div class="export-footer">Actualizado el ${fecha} · Torneos Adila</div>
+  </div>`;
+}
+async function descargarTabla(tipo){
+  if(typeof html2canvas==='undefined'){ alert('No se pudo cargar la herramienta de descarga. Revisá tu conexión e intentá de nuevo.'); return; }
+  const torneo = TORNEOS[state.torneoId];
+  const zona = torneo.zonas.find(z=>z.id===state.zonaId);
+  const c = getCache();
+  const tabla = computeTabla(c.equipos, c.fechas);
+  const holder = document.getElementById('exportHolder');
+  holder.innerHTML = buildExportHTML(torneo, zona, tabla);
+  await new Promise(r=>setTimeout(r,80));
+  try{
+    const canvas = await html2canvas(holder.firstElementChild, { scale:2, backgroundColor:'#F7F5EF' });
+    if(tipo==='png'){
+      const link = document.createElement('a');
+      link.download = `tabla-${torneo.id}-${zona.id}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    } else {
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF({ orientation:'portrait', unit:'pt', format:'a4' });
+      const imgData = canvas.toDataURL('image/png');
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const imgW = pageWidth-40;
+      const imgH = canvas.height*(imgW/canvas.width);
+      pdf.addImage(imgData,'PNG',20,20,imgW,imgH);
+      pdf.save(`tabla-${torneo.id}-${zona.id}.pdf`);
+    }
+  }catch(err){
+    alert('No se pudo generar el archivo. Intentá de nuevo.');
+  } finally {
+    holder.innerHTML='';
+  }
+}
+
+/* =======================================================================
+   RENDER: HEADER
+   ======================================================================= */
+function renderTopbar(title, showBack, onBack){
+  return `
+  <div class="topbar">
+    <div class="topbar-left">
+      ${showBack ? `<button class="back-btn" aria-label="Volver" onclick="${onBack}">←</button>` : ''}
+      <div class="topbar-title">${escapeHtml(title)}</div>
+    </div>
+    ${state.admin
+      ? `<button class="admin-pill on" onclick="adminLogout()">✓ Administrador · Salir</button>`
+      : `<button class="admin-pill" onclick="adminLogin()">🔒 Administradores</button>`}
+  </div>`;
+}
+
+/* =======================================================================
+   RENDER: HOME
+   ======================================================================= */
+function renderHome(){
+  const app = document.getElementById('app');
+  const logoV = state.logos.veteranos50, logoM = state.logos.masCuarenta;
+  app.innerHTML = `
+    ${renderTopbar('Torneos Adila', false)}
+    <div class="hero">
+      <h1>Torneos Adila</h1>
+      <p>Elegí un torneo para ver la tabla y los resultados</p>
+    </div>
+    <div class="torneo-grid">
+      <button class="torneo-card" onclick="goTorneo('veteranos50')">
+        <div class="crest-slot">${logoV?`<img src="${logoV}" alt="">`:'🏆'}</div>
+        <div class="torneo-card-name">Veteranos +50</div>
+        <div class="torneo-card-sub">Zona única</div>
+      </button>
+      <button class="torneo-card" onclick="goTorneo('masCuarenta')">
+        <div class="crest-slot">${logoM?`<img src="${logoM}" alt="">`:'🏆'}</div>
+        <div class="torneo-card-name">+40</div>
+        <div class="torneo-card-sub">Zona A y Zona B</div>
+      </button>
+    </div>
+    <div class="wrap">
+      <p style="text-align:center;color:#6b6659;font-weight:600;margin-top:30px;">
+        Este link se puede compartir con todos: cualquiera puede ver las tablas y resultados.
+        Solo los administradores pueden cargar o modificar datos.
+      </p>
+    </div>
+  `;
+}
+
+/* =======================================================================
+   RENDER: SELECCIÓN DE ZONA
+   ======================================================================= */
+function renderZonaSelect(){
+  const app = document.getElementById('app');
+  const torneo = TORNEOS[state.torneoId];
+  app.innerHTML = `
+    ${renderTopbar(torneo.nombre, true, 'goHome()')}
+    <div class="wrap section">
+      <h2 class="section-title">Elegí la zona</h2>
+      <div class="zona-grid">
+        ${torneo.zonas.map(z=>`
+          <button class="zona-btn" onclick="enterZona('${torneo.id}','${z.id}')">
+            <span>${escapeHtml(z.nombre)}</span>
+            <span class="tag">${z.esperados?z.esperados+' equipos':''}</span>
+          </button>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+/* =======================================================================
+   RENDER: VISTA PRINCIPAL DEL TORNEO/ZONA
+   ======================================================================= */
+function renderTorneoView(){
+  const app = document.getElementById('app');
+  const torneo = TORNEOS[state.torneoId];
+  const zona = torneo.zonas.find(z=>z.id===state.zonaId);
+  const backAction = torneo.zonas.length>1 ? `goTorneo('${torneo.id}')` : 'goHome()';
+  const titulo = torneo.zonas.length>1 ? `${torneo.nombre} · ${zona.nombre}` : torneo.nombre;
+
+  if(state.loadingZona || !getCache()){
+    app.innerHTML = `${renderTopbar(titulo, true, backAction)}<div class="wrap"><p class="loader-note">Cargando datos…</p></div>`;
+    return;
+  }
+
+  const tabs = `
+    <div class="tabs">
+      <button class="tab-btn ${state.subview==='tabla'?'active':''}" onclick="setSubview('tabla')">📊 Tabla</button>
+      <button class="tab-btn ${state.subview==='fixture'?'active':''}" onclick="setSubview('fixture')">📅 Fechas y resultados</button>
+      ${state.admin ? `<button class="tab-btn ${state.subview==='equipos'?'active':''}" onclick="setSubview('equipos')">🛡️ Equipos</button>` : ''}
+    </div>`;
+
+  let body = '';
+  if(state.subview==='tabla') body = renderTablaHTML();
+  else if(state.subview==='fixture') body = renderFixtureHTML();
+  else if(state.subview==='equipos') body = renderEquiposHTML();
+
+  app.innerHTML = `
+    ${renderTopbar(titulo, true, backAction)}
+    <div class="wrap section">
+      ${tabs}
+      ${body}
+    </div>
+    ${state.toast ? `<div class="toast">${escapeHtml(state.toast)}</div>` : ''}
+  `;
+}
+
+/* ---- Sub-vista: Tabla de posiciones ---- */
+function renderTablaHTML(){
+  const c = getCache();
+  const tabla = computeTabla(c.equipos, c.fechas);
+  if(!c.equipos.length){
+    return `<p class="empty-note">Todavía no hay equipos cargados en esta zona.${state.admin?' Andá a la pestaña "Equipos" para agregarlos.':''}</p>`;
+  }
+  const filas = tabla.map((e,i)=>`
+    <tr>
+      <td>${i+1}</td>
+      <td class="equipo-cell"><div class="equipo-cell-inner">
+        ${e.escudo?`<img class="crest-sm" src="${e.escudo}" alt="">`:`<div class="crest-sm-ph">🛡️</div>`}
+        <span>${escapeHtml(e.nombre)}</span>
+      </div></td>
+      <td>${e.pj}</td><td>${e.pg}</td><td>${e.pe}</td><td>${e.pp}</td>
+      <td>${e.gf}</td><td>${e.gc}</td><td>${e.gf-e.gc}</td>
+      <td class="pts-cell">${e.pts}</td>
+    </tr>`).join('');
+  return `
+    <div class="download-row">
+      <button class="btn btn-gold" onclick="descargarTabla('png')">🖼️ Descargar imagen</button>
+      <button class="btn btn-outline" onclick="descargarTabla('pdf')">📄 Descargar PDF</button>
+    </div>
+    <div class="table-scroll">
+      <table class="tabla">
+        <thead><tr>
+          <th>#</th><th class="equipo-cell">Equipo</th><th>PJ</th><th>PG</th><th>PE</th><th>PP</th><th>GF</th><th>GC</th><th>DIF</th><th>PTS</th>
+        </tr></thead>
+        <tbody>${filas}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+/* ---- Sub-vista: Fechas y resultados ---- */
+function renderFixtureHTML(){
+  const c = getCache();
+  if(!c.equipos.length){
+    return `<p class="empty-note">Primero cargá los equipos de la zona${state.admin?' en la pestaña "Equipos"':''}.</p>`;
+  }
+  const chips = c.fechas.slice().sort((a,b)=>a.numero-b.numero).map(f=>`
+    <button class="fecha-chip ${f.numero===state.fechaActual?'active':''}" onclick="irAFecha(${f.numero})">Fecha ${f.numero}</button>
+  `).join('');
+
+  let contenido = '';
+  const fecha = c.fechas.find(f=>f.numero===state.fechaActual);
+
+  if(!fecha){
+    contenido = `<p class="empty-note">${state.admin ? 'Todavía no hay fechas creadas. Usá el botón "Nueva fecha" para empezar a cargar resultados.' : 'Todavía no hay fechas cargadas.'}</p>`;
+  } else {
+    const partidosHTML = (fecha.partidos||[]).map(p=>renderMatchCard(p, c)).join('');
+    const libreEquipo = fecha.libreId ? c.equipos.find(e=>e.id===fecha.libreId) : null;
+    const libreHTML = libreEquipo ? `
+      <div class="libre-card">
+        ${libreEquipo.escudo?`<img class="crest-sm" src="${libreEquipo.escudo}" alt="" style="width:40px;height:40px;">`:'🛌'}
+        <span>${escapeHtml(libreEquipo.nombre)} tiene fecha libre — no juega ni suma puntos esta fecha</span>
+      </div>` : '';
+
+    contenido = `
+      ${libreHTML}
+      ${partidosHTML || `<p class="empty-note">Todavía no hay partidos cargados en esta fecha.</p>`}
+    `;
+
+    if(state.admin){
+      const disponibles = equiposDisponiblesEnFecha(fecha, null);
+      contenido += `
+        <div class="card card-admin">
+          <div class="card-title">⚽ Agregar partido a la Fecha ${fecha.numero}</div>
+          <div class="field">
+            <label for="selLocal">Equipo local</label>
+            <select id="selLocal">
+              <option value="">Elegí un equipo</option>
+              ${disponibles.map(e=>`<option value="${e.id}">${escapeHtml(e.nombre)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label for="selVisitante">Equipo visitante</label>
+            <select id="selVisitante">
+              <option value="">Elegí un equipo</option>
+              ${disponibles.map(e=>`<option value="${e.id}">${escapeHtml(e.nombre)}</option>`).join('')}
+            </select>
+          </div>
+          <button class="btn btn-primary btn-block" onclick="agregarPartido()">Agregar partido</button>
+        </div>
+
+        <div class="card card-admin">
+          <div class="card-title">🛌 Equipo libre esta fecha</div>
+          <div class="field">
+            <label for="selLibre">Elegí el equipo que no juega (opcional)</label>
+            <select id="selLibre" onchange="setLibre(this.value)">
+              <option value="">Ningún equipo libre</option>
+              ${c.equipos.map(e=>`<option value="${e.id}" ${fecha.libreId===e.id?'selected':''}>${escapeHtml(e.nombre)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+
+        <button class="btn btn-danger btn-block" onclick="eliminarFecha()">🗑️ Eliminar esta fecha</button>
+      `;
+    }
+  }
+
+  return `
+    <div class="fecha-row">${chips}</div>
+    ${state.admin ? `<button class="btn btn-outline" style="margin-bottom:16px;" onclick="nuevaFecha()">➕ Nueva fecha</button>` : ''}
+    ${contenido}
+  `;
+}
+
+function renderMatchCard(p, c){
+  const local = c.equipos.find(e=>e.id===p.localId) || { nombre:'—', escudo:null };
+  const visit = c.equipos.find(e=>e.id===p.visitanteId) || { nombre:'—', escudo:null };
+  const crest = (e)=> e.escudo ? `<img class="crest-md" src="${e.escudo}" alt="">` : `<div class="crest-md-ph">🛡️</div>`;
+
+  const marcador = p.jugado
+    ? `<div class="score-box"><span class="score-num">${p.golesLocal}</span><span class="vs-label">—</span><span class="score-num">${p.golesVisitante}</span></div>`
+    : `<div class="pendiente-label">VS · A jugarse</div>`;
+
+  let adminBlock = '';
+  if(state.admin){
+    adminBlock = `
+      <div class="match-admin-row">
+        <div class="score-editor">
+          <button class="step-btn" onclick="stepScore('${p.id}','gl',-1)">−</button>
+          <input class="step-input" type="number" min="0" id="gl-${p.id}" value="${p.golesLocal}">
+          <span class="vs-label">—</span>
+          <input class="step-input" type="number" min="0" id="gv-${p.id}" value="${p.golesVisitante}">
+          <button class="step-btn" onclick="stepScore('${p.id}','gv',1)">+</button>
+        </div>
+        <label class="jugado-check"><input type="checkbox" id="jg-${p.id}" ${p.jugado?'checked':''}> Ya se jugó</label>
+      </div>
+      <div class="btn-row" style="margin-top:12px;">
+        <button class="btn btn-gold" onclick="guardarResultado('${p.id}')">Guardar</button>
+        <button class="btn btn-danger" onclick="eliminarPartido('${p.id}')">Eliminar</button>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="match-card">
+      <div class="match-teams">
+        <div class="match-team">${crest(local)}<div class="match-team-name">${escapeHtml(local.nombre)}</div></div>
+        <div>${marcador}</div>
+        <div class="match-team">${crest(visit)}<div class="match-team-name">${escapeHtml(visit.nombre)}</div></div>
+      </div>
+      ${adminBlock}
+    </div>
+  `;
+}
+
+/* ---- Sub-vista: Gestión de equipos (solo admin) ---- */
+function renderEquiposHTML(){
+  const c = getCache();
+  const torneo = TORNEOS[state.torneoId];
+  const logo = state.logos[torneo.id];
+
+  const filas = c.equipos.map(e=>`
+    <div class="equipo-row">
+      ${e.escudo ? `<img class="crest-md-sm" src="${e.escudo}" alt="">` : `<div class="crest-sm-ph">🛡️</div>`}
+      <div class="nombre">${escapeHtml(e.nombre)}</div>
+      <label class="file-btn" style="width:auto;padding:8px 12px;">📷 Escudo
+        <input type="file" accept="image/*" onchange="onEscudoEquipoChange('${e.id}', this)">
+      </label>
+      <button class="btn btn-danger" style="padding:8px 12px;min-height:40px;" onclick="eliminarEquipo('${e.id}')">Eliminar</button>
+    </div>
+  `).join('');
+
+  return `
+    <div class="card card-admin">
+      <div class="card-title">➕ Agregar equipo</div>
+      <div class="field">
+        <label for="nuevoEquipoNombre">Nombre del equipo</label>
+        <input type="text" id="nuevoEquipoNombre" placeholder="Ej: Los Amigos FC">
+      </div>
+      <button class="btn btn-primary btn-block" onclick="addEquipo()">Agregar equipo</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title">🛡️ Equipos cargados (${c.equipos.length})</div>
+      ${filas || '<p class="empty-note">Todavía no agregaste equipos.</p>'}
+    </div>
+
+    <div class="card card-admin">
+      <div class="card-title">🏆 Logo del torneo</div>
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;">
+        <div class="crest-slot" style="width:56px;height:56px;">${logo?`<img src="${logo}" alt="">`:'🏆'}</div>
+        <span style="color:#6b6659;font-size:.9rem;">Se muestra en la portada y en la tabla descargable.</span>
+      </div>
+      <label class="file-btn">📷 Cambiar logo del torneo
+        <input type="file" accept="image/*" onchange="onLogoTorneoChange(this)">
+      </label>
+    </div>
+  `;
+}
+
+/* =======================================================================
+   DISPATCHER GENERAL
+   ======================================================================= */
+function render(){
+  if(state.view==='home') return renderHome();
+  if(state.view==='zonaSelect') return renderZonaSelect();
+  if(state.view==='torneo') return renderTorneoView();
+}
+
+/* =======================================================================
+   INICIO
+   ======================================================================= */
+(async function init(){
+  render();
+  try{
+    const [lv, lm] = await Promise.all([getLogo('veteranos50'), getLogo('masCuarenta')]);
+    state.logos.veteranos50 = lv;
+    state.logos.masCuarenta = lm;
+    render();
+  }catch(e){ /* si falla, seguimos sin logos */ }
+})();
+</script>
+</body>
+</html>
