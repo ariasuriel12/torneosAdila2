@@ -92,8 +92,7 @@
 
   /* ---------- Campeones enmarcados ---------- */
   .champ-title{ text-align:center; margin:30px 0 6px; font-size:1.5rem; }
-  .champ-grid{ display:grid; grid-template-columns:1fr 1fr; gap:26px; margin:26px 0 10px; }
-  @media (max-width:560px){ .champ-grid{ grid-template-columns:1fr; } }
+  .champ-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:26px; margin:26px 0 10px; }
   .champ-frame{
     position:relative; background:linear-gradient(160deg,#FFF9E6,#F6E7B4); border:3px solid var(--dorado);
     border-radius:18px; padding:34px 16px 22px; text-align:center; margin:6px 8px;
@@ -333,7 +332,9 @@ function ultimaEdicion(){ return state.ediciones[state.ediciones.length-1]; }
 function edicionVista(){ return state.ediciones.find(e=>e.id===state.edicionId) || ultimaEdicion(); }
 function nombreEdicion(ed){
   if(!ed) return '';
-  if(ed.fechaInicio) return 'Torneo ' + fmtFecha(ed.fechaInicio);
+  const f = ed.fechaInicio ? fmtFecha(ed.fechaInicio) : '';
+  if(ed.nombre) return f ? `${ed.nombre} (${f})` : ed.nombre;
+  if(f) return 'Torneo ' + f;
   return ed.cerrada ? 'Torneo anterior' : 'Torneo en curso';
 }
 function puedeEditar(){
@@ -604,26 +605,33 @@ async function eliminarFecha(){
 /* =======================================================================
    TERMINAR TORNEO / CREAR TORNEO NUEVO
    ======================================================================= */
-async function guardarFechaInicio(){
+async function guardarDatosTorneo(){
   const v = document.getElementById('fechaInicioInput').value;
-  if(!v){ alert('Elegí la fecha en que empezó el torneo.'); return; }
+  const n = document.getElementById('nombreTorneoInput').value.trim();
+  if(!v && !n){ alert('Escribí un nombre o elegí la fecha de inicio del torneo.'); return; }
   const ed = ultimaEdicion();
-  ed.fechaInicio = v;
-  if(await saveEdiciones()){ render(); showToast('Fecha guardada ✔'); }
+  if(v) ed.fechaInicio = v;
+  ed.nombre = n || null;
+  if(await saveEdiciones()){ render(); showToast('Datos del torneo guardados ✔'); }
+}
+async function renombrarEdicion(id){
+  const ed = state.ediciones.find(e=>e.id===id); if(!ed) return;
+  const n = prompt('Nombre del torneo (por ejemplo: Apertura 2026). Dejalo vacío para quitar el nombre:', ed.nombre||'');
+  if(n==null) return;
+  ed.nombre = n.trim() || null;
+  if(await saveEdiciones()){ render(); showToast('Nombre guardado ✔'); }
 }
 async function terminarTorneo(){
   const ed = ultimaEdicion();
   if(!ed.fechaInicio){ alert('Primero guardá la fecha en que empezó este torneo (primer recuadro). Con esa fecha se va a llamar el torneo en el historial.'); return; }
   const campeones = {};
-  Object.values(TORNEOS).forEach(t=>{
-    const sel = document.getElementById('camp-'+t.id);
+  Object.values(TORNEOS).forEach(t=>t.zonas.forEach(z=>{
+    const sel = document.getElementById('camp-'+t.id+'-'+z.id);
     if(!sel || !sel.value) return;
-    const [zId, eId] = sel.value.split('|');
-    const c = state.cache[ckey(ed.id,t.id,zId)];
-    const eq = c && c.equipos.find(e=>e.id===eId);
-    const zona = t.zonas.find(z=>z.id===zId);
-    if(eq) campeones[t.id] = { equipoId:eq.id, nombre:eq.nombre, escudo:eq.escudo||null, zonaId:zId, zonaNombre:zona.nombre };
-  });
+    const c = state.cache[ckey(ed.id,t.id,z.id)];
+    const eq = c && c.equipos.find(e=>e.id===sel.value);
+    if(eq) campeones[t.id+'-'+z.id] = { torneoId:t.id, zonaId:z.id, zonaNombre:z.nombre, equipoId:eq.id, nombre:eq.nombre, escudo:eq.escudo||null };
+  }));
   if(!Object.keys(campeones).length && !confirm('No elegiste ningún campeón. ¿Querés terminar el torneo igual?')) return;
   if(!confirm('¿Terminar el torneo? Después no se van a poder cargar más resultados (solo verlos).')) return;
   ed.cerrada = true;
@@ -645,9 +653,10 @@ async function reabrirTorneo(){
 async function crearNuevoTorneo(){
   const fecha = document.getElementById('nuevaFechaInicio').value;
   if(!fecha){ alert('Elegí la fecha en que empieza el nuevo torneo.'); return; }
-  if(!confirm('¿Crear el torneo nuevo con fecha de inicio '+fmtFecha(fecha)+'? Se van a copiar los equipos del torneo anterior.')) return;
+  const nombreNuevo = document.getElementById('nuevoNombre').value.trim();
+  if(!confirm('¿Crear el torneo nuevo'+(nombreNuevo?' "'+nombreNuevo+'"':'')+' con fecha de inicio '+fmtFecha(fecha)+'? Se van a copiar los equipos del torneo anterior.')) return;
   const previo = ultimaEdicion();
-  const nuevo = { id:uid(), fechaInicio:fecha, cerrada:false };
+  const nuevo = { id:uid(), fechaInicio:fecha, cerrada:false, nombre:nombreNuevo||null };
   showToast('Creando torneo nuevo…');
   try{
     for(const t of Object.values(TORNEOS)){
@@ -746,9 +755,13 @@ function renderTopbar(title, showBack, onBack){
 /* Campeones enmarcados */
 function renderCampeones(ed){
   const camp = state.campeones[ed.id] || {};
-  const items = Object.values(TORNEOS).map(t=>{
-    const c = camp[t.id]; if(!c) return '';
-    const sub = t.zonas.length>1 ? `${t.nombre} · ${c.zonaNombre}` : t.nombre;
+  const lista = [];
+  Object.values(TORNEOS).forEach(t=>t.zonas.forEach(z=>{
+    const c = camp[t.id+'-'+z.id] || (t.zonas.length===1 ? camp[t.id] : null);
+    if(c) lista.push({t,z,c});
+  }));
+  const items = lista.map(({t,z,c})=>{
+    const sub = t.zonas.length>1 ? `${t.nombre} · ${z.nombre}` : t.nombre;
     return `
       <div class="champ-frame">
         <div class="champ-ribbon">🏆 CAMPEÓN</div>
@@ -818,6 +831,7 @@ function renderHistorial(){
         <div class="hist-sub">Torneo finalizado</div>
         ${champs || '<p class="empty-note">No se registraron campeones en este torneo.</p>'}
         <button class="btn btn-outline btn-block" onclick="verEdicion('${ed.id}')">Ver tablas y resultados de este torneo</button>
+        ${state.admin ? `<button class="btn btn-outline btn-block" style="margin-top:10px;" onclick="renombrarEdicion('${ed.id}')">✏️ Cambiar nombre del torneo</button>` : ''}
       </div>`;
   }).join('');
   document.getElementById('app').innerHTML = `
@@ -831,15 +845,12 @@ function renderHistorial(){
 /* =======================================================================
    RENDER: ADMINISTRAR TORNEO
    ======================================================================= */
-function opcionesCampeon(ed, torneo){
-  const unaZona = torneo.zonas.length===1;
+function opcionesCampeon(ed, torneo, zona){
   let html = '<option value="">— Elegí al campeón —</option>';
-  torneo.zonas.forEach(z=>{
-    const c = state.cache[ckey(ed.id,torneo.id,z.id)]; if(!c) return;
-    const tabla = computeTabla(c.equipos, c.fechas);
-    const opts = tabla.map((e,i)=>`<option value="${z.id}|${e.id}" ${unaZona && i===0 && e.pj>0 ? 'selected':''}>${i+1}° ${escapeHtml(e.nombre)} (${e.pts} pts)</option>`).join('');
-    html += unaZona ? opts : `<optgroup label="${escapeHtml(z.nombre)}">${opts}</optgroup>`;
-  });
+  const c = state.cache[ckey(ed.id,torneo.id,zona.id)];
+  if(!c) return html;
+  const tabla = computeTabla(c.equipos, c.fechas);
+  html += tabla.map((e,i)=>`<option value="${e.id}" ${i===0 && e.pj>0 ? 'selected':''}>${i+1}° ${escapeHtml(e.nombre)} (${e.pts} pts)</option>`).join('');
   return html;
 }
 function renderAdminTorneo(){
@@ -848,19 +859,26 @@ function renderAdminTorneo(){
   if(!ed.cerrada){
     cuerpo = `
       <div class="card card-admin">
-        <div class="card-title">📅 Fecha en que empezó este torneo</div>
-        <p class="help">Con esta fecha se llama el torneo en el historial.</p>
-        <div class="field"><input type="date" id="fechaInicioInput" value="${ed.fechaInicio||''}"></div>
-        <button class="btn btn-primary btn-block" onclick="guardarFechaInicio()">Guardar fecha</button>
+        <div class="card-title">📅 Nombre y fecha de este torneo</div>
+        <p class="help">La fecha de inicio es obligatoria para poder terminar el torneo. El nombre es opcional (por ejemplo: Apertura 2026) y se muestra junto con la fecha.</p>
+        <div class="field">
+          <label for="nombreTorneoInput">Nombre del torneo (opcional)</label>
+          <input type="text" id="nombreTorneoInput" placeholder="Ej: Apertura 2026" value="${escapeHtml(ed.nombre||'')}">
+        </div>
+        <div class="field">
+          <label for="fechaInicioInput">Fecha en que empezó</label>
+          <input type="date" id="fechaInicioInput" value="${ed.fechaInicio||''}">
+        </div>
+        <button class="btn btn-primary btn-block" onclick="guardarDatosTorneo()">Guardar nombre y fecha</button>
       </div>
       <div class="card card-admin">
         <div class="card-title">🏁 Terminar el torneo y guardar campeones</div>
-        <p class="help">Elegí quién fue el campeón de cada torneo. Si en el +40 hubo final, elegí al ganador de la final. Después de terminar, ya no se pueden cargar resultados.</p>
-        ${Object.values(TORNEOS).map(t=>`
+        <p class="help">Hay tres campeones: el del +50, el de la Zona A del +40 y el de la Zona B del +40. Ya aparece elegido el que va primero en cada tabla; cambialo si hace falta. Después de terminar, ya no se pueden cargar resultados.</p>
+        ${Object.values(TORNEOS).map(t=>t.zonas.map(z=>`
           <div class="field">
-            <label for="camp-${t.id}">Campeón del ${escapeHtml(t.nombre)}</label>
-            <select id="camp-${t.id}">${opcionesCampeon(ed,t)}</select>
-          </div>`).join('')}
+            <label for="camp-${t.id}-${z.id}">Campeón: ${escapeHtml(t.zonas.length>1 ? t.nombre+' · '+z.nombre : t.nombre)}</label>
+            <select id="camp-${t.id}-${z.id}">${opcionesCampeon(ed,t,z)}</select>
+          </div>`).join('')).join('')}
         <button class="btn btn-gold btn-block" onclick="terminarTorneo()">🏆 Terminar torneo y guardar campeones</button>
       </div>`;
   } else {
@@ -868,11 +886,16 @@ function renderAdminTorneo(){
       <div class="card">
         <div class="card-title">✅ ${escapeHtml(nombreEdicion(ed))} está terminado</div>
         ${renderCampeones(ed)}
+        <button class="btn btn-outline btn-block" style="margin-bottom:10px;" onclick="renombrarEdicion('${ed.id}')">✏️ Cambiar nombre del torneo</button>
         <button class="btn btn-danger btn-block" onclick="reabrirTorneo()">↩️ Volver a abrir este torneo (para corregir algo)</button>
       </div>
       <div class="card card-admin">
         <div class="card-title">🆕 Crear torneo nuevo</div>
         <p class="help">Se guardan los equipos y escudos del torneo anterior. Después, dentro de cada zona, en la pestaña "Equipos" podés agregar equipos nuevos o borrar los que no sigan.</p>
+        <div class="field">
+          <label for="nuevoNombre">Nombre del torneo nuevo (opcional)</label>
+          <input type="text" id="nuevoNombre" placeholder="Ej: Clausura 2027">
+        </div>
         <div class="field">
           <label for="nuevaFechaInicio">¿Qué día empieza el torneo nuevo?</label>
           <input type="date" id="nuevaFechaInicio" value="${hoyISO()}">
