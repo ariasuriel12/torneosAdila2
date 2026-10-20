@@ -330,12 +330,23 @@ function resizeImageToDataURL(file, maxDim){
 /* ---- Ediciones (cada torneo nuevo es una "edición" con nombre = fecha de inicio) ---- */
 function ultimaEdicion(){ return state.ediciones[state.ediciones.length-1]; }
 function edicionVista(){ return state.ediciones.find(e=>e.id===state.edicionId) || ultimaEdicion(); }
-function nombreEdicion(ed){
+/* Cada torneo (+50 y +40) puede tener su propio nombre dentro de una edición. */
+function nombreTorneoEd(ed, torneoId){
+  return (ed && ed.nombres && ed.nombres[torneoId]) || (ed && ed.nombre) || '';
+}
+function nombreEdicion(ed, torneoId){
   if(!ed) return '';
   const f = ed.fechaInicio ? fmtFecha(ed.fechaInicio) : '';
-  if(ed.nombre) return f ? `${ed.nombre} (${f})` : ed.nombre;
+  const n = torneoId ? nombreTorneoEd(ed, torneoId) : '';
+  if(n) return f ? `${n} (${f})` : n;
   if(f) return 'Torneo ' + f;
   return ed.cerrada ? 'Torneo anterior' : 'Torneo en curso';
+}
+function resumenNombres(ed){
+  return Object.values(TORNEOS).map(t=>{
+    const n = nombreTorneoEd(ed, t.id);
+    return n ? `${t.nombre.replace('Torneo ','')}: ${n}` : '';
+  }).filter(Boolean).join(' · ');
 }
 function puedeEditar(){
   const ed = edicionVista();
@@ -607,19 +618,26 @@ async function eliminarFecha(){
    ======================================================================= */
 async function guardarDatosTorneo(){
   const v = document.getElementById('fechaInicioInput').value;
-  const n = document.getElementById('nombreTorneoInput').value.trim();
-  if(!v && !n){ alert('Escribí un nombre o elegí la fecha de inicio del torneo.'); return; }
+  const nombres = {};
+  Object.values(TORNEOS).forEach(t=>{ nombres[t.id] = document.getElementById('nombre-'+t.id).value.trim() || null; });
+  if(!v && !Object.values(nombres).some(Boolean)){ alert('Escribí algún nombre o elegí la fecha de inicio del torneo.'); return; }
   const ed = ultimaEdicion();
   if(v) ed.fechaInicio = v;
-  ed.nombre = n || null;
+  ed.nombres = nombres;
+  ed.nombre = null;
   if(await saveEdiciones()){ render(); showToast('Datos del torneo guardados ✔'); }
 }
 async function renombrarEdicion(id){
   const ed = state.ediciones.find(e=>e.id===id); if(!ed) return;
-  const n = prompt('Nombre del torneo (por ejemplo: Apertura 2026). Dejalo vacío para quitar el nombre:', ed.nombre||'');
-  if(n==null) return;
-  ed.nombre = n.trim() || null;
-  if(await saveEdiciones()){ render(); showToast('Nombre guardado ✔'); }
+  const nombres = {};
+  for(const t of Object.values(TORNEOS)){
+    const n = prompt('Nombre del '+t.nombre+' (por ejemplo: Apertura 2026). Dejalo vacío para quitar el nombre:', nombreTorneoEd(ed,t.id));
+    if(n==null) return;
+    nombres[t.id] = n.trim() || null;
+  }
+  ed.nombres = nombres;
+  ed.nombre = null;
+  if(await saveEdiciones()){ render(); showToast('Nombres guardados ✔'); }
 }
 async function terminarTorneo(){
   const ed = ultimaEdicion();
@@ -653,10 +671,11 @@ async function reabrirTorneo(){
 async function crearNuevoTorneo(){
   const fecha = document.getElementById('nuevaFechaInicio').value;
   if(!fecha){ alert('Elegí la fecha en que empieza el nuevo torneo.'); return; }
-  const nombreNuevo = document.getElementById('nuevoNombre').value.trim();
-  if(!confirm('¿Crear el torneo nuevo'+(nombreNuevo?' "'+nombreNuevo+'"':'')+' con fecha de inicio '+fmtFecha(fecha)+'? Se van a copiar los equipos del torneo anterior.')) return;
+  const nombresNuevos = {};
+  Object.values(TORNEOS).forEach(t=>{ nombresNuevos[t.id] = document.getElementById('nuevoNombre-'+t.id).value.trim() || null; });
+  if(!confirm('¿Crear el torneo nuevo con fecha de inicio '+fmtFecha(fecha)+'? Se van a copiar los equipos del torneo anterior.')) return;
   const previo = ultimaEdicion();
-  const nuevo = { id:uid(), fechaInicio:fecha, cerrada:false, nombre:nombreNuevo||null };
+  const nuevo = { id:uid(), fechaInicio:fecha, cerrada:false, nombres:nombresNuevos };
   showToast('Creando torneo nuevo…');
   try{
     for(const t of Object.values(TORNEOS)){
@@ -698,7 +717,7 @@ function buildExportHTML(torneo, zona, tabla){
       ${logo?`<img class="export-logo" src="${logo}">`:''}
       <div>
         <div class="export-torneo">${escapeHtml(torneo.nombre)}</div>
-        <div class="export-zona">${escapeHtml(zona.nombre)} · ${escapeHtml(nombreEdicion(edicionVista()))}</div>
+        <div class="export-zona">${escapeHtml(zona.nombre)} · ${escapeHtml(nombreEdicion(edicionVista(), torneo.id))}</div>
       </div>
     </div>
     <table class="export-table">
@@ -761,7 +780,8 @@ function renderCampeones(ed){
     if(c) lista.push({t,z,c});
   }));
   const items = lista.map(({t,z,c})=>{
-    const sub = t.zonas.length>1 ? `${t.nombre} · ${z.nombre}` : t.nombre;
+    const nEd = nombreTorneoEd(ed, t.id);
+    const sub = (t.zonas.length>1 ? `${t.nombre} · ${z.nombre}` : t.nombre) + (nEd ? ` · ${nEd}` : '');
     return `
       <div class="champ-frame">
         <div class="champ-ribbon">🏆 CAMPEÓN</div>
@@ -792,11 +812,13 @@ function renderHome(){
         <div class="crest-slot">${logoV?`<img src="${logoV}" alt="">`:'🏆'}</div>
         <div class="torneo-card-name">Veteranos +50</div>
         <div class="torneo-card-sub">Zona única</div>
+        ${nombreTorneoEd(ed,'veteranos50') ? `<div class="torneo-card-sub" style="color:var(--dorado);font-weight:800;margin-top:-4px;">${escapeHtml(nombreTorneoEd(ed,'veteranos50'))}</div>` : ''}
       </button>
       <button class="torneo-card" onclick="goTorneo('masCuarenta')">
         <div class="crest-slot">${logoM?`<img src="${logoM}" alt="">`:'🏆'}</div>
         <div class="torneo-card-name">+40</div>
         <div class="torneo-card-sub">Zona A y Zona B</div>
+        ${nombreTorneoEd(ed,'masCuarenta') ? `<div class="torneo-card-sub" style="color:var(--dorado);font-weight:800;margin-top:-4px;">${escapeHtml(nombreTorneoEd(ed,'masCuarenta'))}</div>` : ''}
       </button>
     </div>
     <div class="wrap">
@@ -828,7 +850,7 @@ function renderHistorial(){
     return `
       <div class="hist-card">
         <h3>${escapeHtml(nombreEdicion(ed))}</h3>
-        <div class="hist-sub">Torneo finalizado</div>
+        <div class="hist-sub">Torneo finalizado${resumenNombres(ed) ? ' · '+escapeHtml(resumenNombres(ed)) : ''}</div>
         ${champs || '<p class="empty-note">No se registraron campeones en este torneo.</p>'}
         <button class="btn btn-outline btn-block" onclick="verEdicion('${ed.id}')">Ver tablas y resultados de este torneo</button>
         ${state.admin ? `<button class="btn btn-outline btn-block" style="margin-top:10px;" onclick="renombrarEdicion('${ed.id}')">✏️ Cambiar nombre del torneo</button>` : ''}
@@ -859,12 +881,13 @@ function renderAdminTorneo(){
   if(!ed.cerrada){
     cuerpo = `
       <div class="card card-admin">
-        <div class="card-title">📅 Nombre y fecha de este torneo</div>
-        <p class="help">La fecha de inicio es obligatoria para poder terminar el torneo. El nombre es opcional (por ejemplo: Apertura 2026) y se muestra junto con la fecha.</p>
+        <div class="card-title">📅 Nombres y fecha de este torneo</div>
+        <p class="help">El +50 y el +40 pueden tener cada uno su propio nombre (por ejemplo: Apertura 2026). Los nombres son opcionales. La fecha de inicio es obligatoria para poder terminar el torneo.</p>
+        ${Object.values(TORNEOS).map(t=>`
         <div class="field">
-          <label for="nombreTorneoInput">Nombre del torneo (opcional)</label>
-          <input type="text" id="nombreTorneoInput" placeholder="Ej: Apertura 2026" value="${escapeHtml(ed.nombre||'')}">
-        </div>
+          <label for="nombre-${t.id}">Nombre del ${escapeHtml(t.nombre)} (opcional)</label>
+          <input type="text" id="nombre-${t.id}" placeholder="Ej: Apertura 2026" value="${escapeHtml(nombreTorneoEd(ed,t.id))}">
+        </div>`).join('')}
         <div class="field">
           <label for="fechaInicioInput">Fecha en que empezó</label>
           <input type="date" id="fechaInicioInput" value="${ed.fechaInicio||''}">
@@ -892,10 +915,11 @@ function renderAdminTorneo(){
       <div class="card card-admin">
         <div class="card-title">🆕 Crear torneo nuevo</div>
         <p class="help">Se guardan los equipos y escudos del torneo anterior. Después, dentro de cada zona, en la pestaña "Equipos" podés agregar equipos nuevos o borrar los que no sigan.</p>
+        ${Object.values(TORNEOS).map(t=>`
         <div class="field">
-          <label for="nuevoNombre">Nombre del torneo nuevo (opcional)</label>
-          <input type="text" id="nuevoNombre" placeholder="Ej: Clausura 2027">
-        </div>
+          <label for="nuevoNombre-${t.id}">Nombre del ${escapeHtml(t.nombre)} nuevo (opcional)</label>
+          <input type="text" id="nuevoNombre-${t.id}" placeholder="Ej: Clausura 2027">
+        </div>`).join('')}
         <div class="field">
           <label for="nuevaFechaInicio">¿Qué día empieza el torneo nuevo?</label>
           <input type="date" id="nuevaFechaInicio" value="${hoyISO()}">
@@ -919,7 +943,7 @@ function renderZonaSelect(){
   document.getElementById('app').innerHTML = `
     ${renderTopbar(torneo.nombre, true, 'goHome()')}
     <div class="wrap section">
-      <span class="ed-chip ${edicionVista().cerrada?'fin':''}">${escapeHtml(nombreEdicion(edicionVista()))}</span>
+      <span class="ed-chip ${edicionVista().cerrada?'fin':''}">${escapeHtml(nombreEdicion(edicionVista(), torneo.id))}</span>
       <h2 class="section-title">Elegí la zona</h2>
       <div class="zona-grid">
         ${torneo.zonas.map(z=>`
@@ -951,20 +975,31 @@ function renderTorneoView(){
     <div class="tabs">
       <button class="tab-btn ${state.subview==='tabla'?'active':''}" onclick="setSubview('tabla')">📊 Tabla</button>
       <button class="tab-btn ${state.subview==='fixture'?'active':''}" onclick="setSubview('fixture')">📅 Fechas y resultados</button>
+      <button class="tab-btn ${state.subview==='copa'?'active':''}" onclick="setSubview('copa')">🏆 Copa</button>
       ${editar ? `<button class="tab-btn ${state.subview==='equipos'?'active':''}" onclick="setSubview('equipos')">🛡️ Equipos</button>` : ''}
     </div>`;
 
   let body = '';
   if(state.subview==='tabla') body = renderTablaHTML();
   else if(state.subview==='fixture') body = renderFixtureHTML();
+  else if(state.subview==='copa') body = renderCopaHTML();
   else if(state.subview==='equipos') body = renderEquiposHTML();
 
   app.innerHTML = `
     ${renderTopbar(titulo, true, backAction)}
     <div class="wrap section">
-      <span class="ed-chip ${ed.cerrada?'fin':''}">${escapeHtml(nombreEdicion(ed))}${ed.cerrada?' · Finalizado (solo lectura)':''}</span>
+      <span class="ed-chip ${ed.cerrada?'fin':''}">${escapeHtml(nombreEdicion(ed, torneo.id))}${ed.cerrada?' · Finalizado (solo lectura)':''}</span>
       ${tabs}
       ${body}
+    </div>`;
+}
+
+function renderCopaHTML(){
+  return `
+    <div class="card" style="text-align:center;padding:34px 18px;">
+      <div style="font-size:3.2rem;">🏆</div>
+      <h2 class="section-title" style="margin:8px 0 10px;">Copa</h2>
+      <p style="margin:0;color:#5d5a4d;font-weight:600;">Próximamente: acá se van a ver los partidos y resultados de la copa.</p>
     </div>`;
 }
 
