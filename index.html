@@ -271,7 +271,8 @@ const state = {
   cache:{},               // datos por edición/torneo/zona
   logos:{},
   ediciones:[],           // [{id, fechaInicio, cerrada}]
-  campeones:{},           // campeones[edicionId] = { torneoId: {...} }
+  campeones:{},           // campeones[edicionId] = { "torneoId-zonaId": {...} }
+  errorCampeones:{},      // ediciones cuyos campeones no se pudieron cargar
   edicionId:null,         // edición que se está viendo
   cargando:true, errorCarga:false, loadingZona:false,
   toast:null
@@ -390,13 +391,41 @@ async function loadEdiciones(){
     await saveEdiciones();
   }
 }
-async function loadCampeones(){
-  await Promise.all(state.ediciones.filter(e=>e.cerrada).map(async e=>{
+async function cargarCampeonesDe(edId){
+  let ultimoError = null;
+  for(let i=0;i<3;i++){
     try{
-      const v = await storageGet('campeones-'+e.id);
-      state.campeones[e.id] = v ? JSON.parse(v) : {};
-    }catch(err){ state.campeones[e.id] = {}; }
-  }));
+      const v = await storageGet('campeones-'+edId);
+      state.campeones[edId] = normalizarCampeones(v ? JSON.parse(v) : {});
+      delete state.errorCampeones[edId];
+      return true;
+    }catch(err){ ultimoError = err; await new Promise(r=>setTimeout(r,600)); }
+  }
+  console.error('Campeones no cargados', edId, ultimoError);
+  state.errorCampeones[edId] = true;
+  if(!state.campeones[edId]) state.campeones[edId] = {};
+  return false;
+}
+/* Los campeones guardados con la versión anterior (uno por torneo) se convierten al formato
+   nuevo (uno por zona), así no se pierde ninguno. */
+function normalizarCampeones(camp){
+  const out = {};
+  Object.keys(camp||{}).forEach(k=>{
+    const c = camp[k]; if(!c) return;
+    if(c.torneoId){ out[k] = c; return; }
+    const t = TORNEOS[k]; if(!t) return;
+    const zId = c.zonaId || t.zonas[0].id;
+    const z = t.zonas.find(x=>x.id===zId) || t.zonas[0];
+    out[t.id+'-'+z.id] = Object.assign({}, c, { torneoId:t.id, zonaId:z.id, zonaNombre:z.nombre });
+  });
+  return out;
+}
+async function loadCampeones(){
+  await Promise.all(state.ediciones.filter(e=>e.cerrada).map(e=>cargarCampeonesDe(e.id)));
+}
+async function reintentarCampeones(){
+  await loadCampeones();
+  render();
 }
 
 function ckey(edId,t,z){ return edId+'|'+t+'|'+z; }
@@ -444,7 +473,10 @@ function computeTabla(equipos, fechas){
    NAVEGACIÓN
    ======================================================================= */
 function goHome(){ state.view='home'; state.torneoId=null; state.zonaId=null; render(); }
-function goHistorial(){ state.view='historial'; render(); }
+function goHistorial(){
+  state.view='historial'; render();
+  if(Object.keys(state.errorCampeones).length) loadCampeones().then(render);
+}
 function verEdicion(id){ state.edicionId=id; state.view='home'; state.torneoId=null; state.zonaId=null; render(); window.scrollTo(0,0); }
 function volverActual(){ verEdicion(ultimaEdicion().id); }
 function goTorneo(torneoId){
@@ -639,9 +671,7 @@ async function renombrarEdicion(id){
   ed.nombre = null;
   if(await saveEdiciones()){ render(); showToast('Nombres guardados ✔'); }
 }
-async function terminarTorneo(){
-  const ed = ultimaEdicion();
-  if(!ed.fechaInicio){ alert('Primero guardá la fecha en que empezó este torneo (primer recuadro). Con esa fecha se va a llamar el torneo en el historial.'); return; }
+function recolectarCampeones(ed){
   const campeones = {};
   Object.values(TORNEOS).forEach(t=>t.zonas.forEach(z=>{
     const sel = document.getElementById('camp-'+t.id+'-'+z.id);
@@ -650,6 +680,29 @@ async function terminarTorneo(){
     const eq = c && c.equipos.find(e=>e.id===sel.value);
     if(eq) campeones[t.id+'-'+z.id] = { torneoId:t.id, zonaId:z.id, zonaNombre:z.nombre, equipoId:eq.id, nombre:eq.nombre, escudo:eq.escudo||null };
   }));
+  return campeones;
+}
+async function goEditarCampeones(edId){
+  state.edicionEdit = edId; state.view='editarCampeones'; render();
+  const tareas = [];
+  Object.values(TORNEOS).forEach(t=>t.zonas.forEach(z=>tareas.push(ensureZonaData(edId,t.id,z.id))));
+  await Promise.all(tareas);
+  render();
+}
+async function guardarCampeonesEditados(){
+  const ed = state.ediciones.find(e=>e.id===state.edicionEdit); if(!ed) return;
+  const nuevos = recolectarCampeones(ed);
+  const previos = state.campeones[ed.id];
+  state.campeones[ed.id] = nuevos;
+  if(await saveCampeones(ed.id)){
+    delete state.errorCampeones[ed.id];
+    state.view='historial'; render(); showToast('Campeones guardados ✔');
+  } else { state.campeones[ed.id] = previos; render(); }
+}
+async function terminarTorneo(){
+  const ed = ultimaEdicion();
+  if(!ed.fechaInicio){ alert('Primero guardá la fecha en que empezó este torneo (primer recuadro). Con esa fecha se va a llamar el torneo en el historial.'); return; }
+  const campeones = recolectarCampeones(ed);
   if(!Object.keys(campeones).length && !confirm('No elegiste ningún campeón. ¿Querés terminar el torneo igual?')) return;
   if(!confirm('¿Terminar el torneo? Después no se van a poder cargar más resultados (solo verlos).')) return;
   ed.cerrada = true;
@@ -678,25 +731,193 @@ async function crearNuevoTorneo(){
   const nuevo = { id:uid(), fechaInicio:fecha, cerrada:false, nombres:nombresNuevos };
   showToast('Creando torneo nuevo…');
   try{
+    /* Todos los equipos del torneo anterior pasan a un grupo "sin zona": las zonas se arman de nuevo. */
+    const pool = [];
+    const vistos = new Set();
+    for(const d of destinosZona()){
+      const key = ckey(previo.id,d.t,d.z);
+      const equipos = state.cache[key] ? state.cache[key].equipos : await getEquipos(previo.id,d.t,d.z);
+      equipos.forEach(e=>{
+        if(vistos.has(e.id)) return;
+        vistos.add(e.id);
+        pool.push({ id:e.id, nombre:e.nombre, escudo:e.escudo||null });
+      });
+    }
+    pool.sort((a,b)=>a.nombre.localeCompare(b.nombre,'es'));
     for(const t of Object.values(TORNEOS)){
       for(const z of t.zonas){
-        const key = ckey(previo.id,t.id,z.id);
-        const equipos = state.cache[key] ? state.cache[key].equipos : await getEquipos(previo.id,t.id,z.id);
-        const copia = equipos.map(e=>({ id:e.id, nombre:e.nombre, escudo:e.escudo||null }));
-        const ok1 = await saveEquipos(nuevo.id,t.id,z.id,copia);
-        const ok2 = await saveFechas(nuevo.id,t.id,z.id,[]);
-        if(!ok1 || !ok2) return;
-        state.cache[ckey(nuevo.id,t.id,z.id)] = { equipos:copia, fechas:[] };
+        if(!(await saveEquipos(nuevo.id,t.id,z.id,[])) || !(await saveFechas(nuevo.id,t.id,z.id,[]))) return;
+        state.cache[ckey(nuevo.id,t.id,z.id)] = { equipos:[], fechas:[] };
       }
     }
+    if(!(await saveEquipos(nuevo.id,POOL.t,POOL.z,pool)) || !(await saveFechas(nuevo.id,POOL.t,POOL.z,[]))) return;
+    state.cache[ckey(nuevo.id,POOL.t,POOL.z)] = { equipos:pool, fechas:[] };
   }catch(e){ alert('No se pudo crear el torneo. Revisá tu conexión e intentá de nuevo.'); return; }
   state.ediciones.push(nuevo);
   if(!(await saveEdiciones())){ state.ediciones.pop(); return; }
   state.edicionId = nuevo.id;
-  state.view = 'home';
+  state.view = 'armarZonas';
   render(); window.scrollTo(0,0);
-  showToast('Torneo nuevo creado ✔ Revisá los equipos en cada zona');
+  showToast('Torneo nuevo creado ✔ Ahora armá las zonas');
 }
+
+/* =======================================================================
+   ARMAR ZONAS (equipos "sin zona" -> asignar a cada zona)
+   ======================================================================= */
+const POOL = { t:'pool', z:'sin' };
+function destinosZona(){
+  const lista = [];
+  Object.values(TORNEOS).forEach(t=>t.zonas.forEach(z=>{
+    lista.push({ t:t.id, z:z.id, valor:t.id+'|'+z.id, label: t.zonas.length>1 ? `${t.nombre.replace('Torneo ','')} · ${z.nombre}` : t.nombre.replace('Torneo ','') });
+  }));
+  lista.push({ t:POOL.t, z:POOL.z, valor:'', label:'Sin zona' });
+  return lista;
+}
+async function goArmarZonas(){
+  state.view='armarZonas'; render();
+  const ed = ultimaEdicion();
+  const tareas = destinosZona().map(d=>ensureZonaData(ed.id,d.t,d.z));
+  await Promise.all(tareas);
+  render();
+}
+function zonasCargadas(ed){
+  return destinosZona().every(d=>state.cache[ckey(ed.id,d.t,d.z)]);
+}
+function ubicarEquipo(edId, equipoId){
+  for(const d of destinosZona()){
+    const c = state.cache[ckey(edId,d.t,d.z)];
+    const eq = c && c.equipos.find(e=>e.id===equipoId);
+    if(eq) return { d, c, eq };
+  }
+  return null;
+}
+function partidosDe(c, equipoId){
+  return c.fechas.reduce((n,f)=>n+(f.partidos||[]).filter(p=>p.localId===equipoId||p.visitanteId===equipoId).length,0);
+}
+async function guardarZonaCache(edId, d){
+  const c = state.cache[ckey(edId,d.t,d.z)];
+  const ok1 = await saveEquipos(edId,d.t,d.z,c.equipos);
+  const ok2 = await saveFechas(edId,d.t,d.z,c.fechas);
+  return ok1 && ok2;
+}
+async function moverEquipo(equipoId, valor){
+  const ed = ultimaEdicion();
+  const ub = ubicarEquipo(ed.id, equipoId); if(!ub) return;
+  const destinos = destinosZona();
+  const dest = destinos.find(d=>d.valor===valor);
+  if(!dest || (dest.t===ub.d.t && dest.z===ub.d.z)) return;
+  const n = partidosDe(ub.c, equipoId);
+  if(n>0 && !confirm(`${ub.eq.nombre} ya tiene ${n} partido(s) cargado(s) en ${ub.d.label}. Si lo cambiás de zona, esos partidos se borran. ¿Cambiarlo igual?`)){ render(); return; }
+  const cDest = state.cache[ckey(ed.id,dest.t,dest.z)];
+  ub.c.equipos = ub.c.equipos.filter(e=>e.id!==equipoId);
+  ub.c.fechas.forEach(f=>{ f.partidos = (f.partidos||[]).filter(p=>p.localId!==equipoId && p.visitanteId!==equipoId); });
+  cDest.equipos.push(ub.eq);
+  cDest.equipos.sort((a,b)=>a.nombre.localeCompare(b.nombre,'es'));
+  render();
+  const ok1 = await guardarZonaCache(ed.id, dest);
+  const ok2 = await guardarZonaCache(ed.id, ub.d);
+  if(ok1 && ok2) showToast(`${ub.eq.nombre} → ${dest.label} ✔`);
+}
+async function addEquipoArmado(){
+  const input = document.getElementById('nuevoEquipoArmado');
+  const nombre = input.value.trim();
+  if(!nombre){ alert('Escribí el nombre del equipo.'); return; }
+  const ed = ultimaEdicion();
+  const c = state.cache[ckey(ed.id,POOL.t,POOL.z)];
+  c.equipos.push({ id:uid(), nombre, escudo:null });
+  c.equipos.sort((a,b)=>a.nombre.localeCompare(b.nombre,'es'));
+  if(await saveEquipos(ed.id,POOL.t,POOL.z,c.equipos)){ render(); showToast('Equipo agregado ✔ Elegile la zona'); }
+}
+async function eliminarEquipoArmado(equipoId){
+  const ed = ultimaEdicion();
+  const ub = ubicarEquipo(ed.id, equipoId); if(!ub) return;
+  if(!confirm(`¿Borrar a ${ub.eq.nombre}? También se borran sus partidos cargados.`)) return;
+  ub.c.equipos = ub.c.equipos.filter(e=>e.id!==equipoId);
+  ub.c.fechas.forEach(f=>{ f.partidos = (f.partidos||[]).filter(p=>p.localId!==equipoId && p.visitanteId!==equipoId); });
+  render();
+  if(await guardarZonaCache(ed.id, ub.d)) showToast('Equipo borrado');
+}
+async function renombrarEquipoArmado(equipoId){
+  const ed = ultimaEdicion();
+  const ub = ubicarEquipo(ed.id, equipoId); if(!ub) return;
+  const nuevo = prompt('Nuevo nombre del equipo:', ub.eq.nombre);
+  if(nuevo==null || !nuevo.trim()) return;
+  ub.eq.nombre = nuevo.trim();
+  ub.c.equipos.sort((a,b)=>a.nombre.localeCompare(b.nombre,'es'));
+  render();
+  if(await guardarZonaCache(ed.id, ub.d)) showToast('Nombre actualizado ✔');
+}
+async function escudoEquipoArmado(equipoId, inputEl){
+  const file = inputEl.files[0]; if(!file) return;
+  const ed = ultimaEdicion();
+  const ub = ubicarEquipo(ed.id, equipoId); if(!ub) return;
+  try{
+    ub.eq.escudo = await resizeImageToDataURL(file, 140);
+    render();
+    if(await guardarZonaCache(ed.id, ub.d)) showToast('Escudo actualizado ✔');
+  }catch(err){ alert('No se pudo cargar la imagen. Probá con otra foto.'); }
+}
+function renderArmarZonas(){
+  const ed = ultimaEdicion();
+  const volver = 'goAdminVolver()';
+  if(!zonasCargadas(ed)){
+    document.getElementById('app').innerHTML = `${renderTopbar('Armar zonas', true, volver)}<div class="wrap"><p class="loader-note">Cargando equipos…</p></div>`;
+    return;
+  }
+  const destinos = destinosZona();
+  const todos = [];
+  destinos.forEach(d=>state.cache[ckey(ed.id,d.t,d.z)].equipos.forEach(eq=>todos.push({ eq, d })));
+  todos.sort((a,b)=>a.eq.nombre.localeCompare(b.eq.nombre,'es'));
+
+  const conteos = destinos.map(d=>{
+    const n = state.cache[ckey(ed.id,d.t,d.z)].equipos.length;
+    const aviso = (d.valor && n%2===1) ? ' · queda un equipo libre por fecha' : '';
+    return `<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--linea);${d.valor?'':'color:#7a7566;'}">
+      <b>${escapeHtml(d.label)}</b><span>${n} equipo${n===1?'':'s'}${aviso}</span></div>`;
+  }).join('');
+
+  const filas = todos.map(({eq,d})=>`
+    <div class="equipo-row">
+      ${eq.escudo ? `<img class="crest-md-sm" src="${eq.escudo}" alt="">` : `<div class="crest-sm-ph" style="width:40px;height:40px;">🛡️</div>`}
+      <div class="nombre">${escapeHtml(eq.nombre)}</div>
+      <select aria-label="Zona de ${escapeHtml(eq.nombre)}" style="min-height:44px;padding:8px;border-radius:10px;border:2px solid ${d.valor?'var(--verde)':'var(--rojo)'};font-weight:700;background:var(--tiza);" onchange="moverEquipo('${eq.id}', this.value)">
+        ${destinos.map(x=>`<option value="${x.valor}" ${x.t===d.t&&x.z===d.z?'selected':''}>${escapeHtml(x.label)}</option>`).join('')}
+      </select>
+      <button class="btn btn-outline" style="padding:8px 12px;min-height:40px;" onclick="renombrarEquipoArmado('${eq.id}')">✏️</button>
+      <label class="file-btn" style="width:auto;padding:8px 12px;">📷
+        <input type="file" accept="image/*" onchange="escudoEquipoArmado('${eq.id}', this)">
+      </label>
+      <button class="btn btn-danger" style="padding:8px 12px;min-height:40px;" onclick="eliminarEquipoArmado('${eq.id}')">🗑️</button>
+    </div>`).join('');
+
+  document.getElementById('app').innerHTML = `
+    ${renderTopbar('Armar zonas', true, volver)}
+    <div class="wrap section">
+      <span class="ed-chip">${escapeHtml(nombreEdicion(ed))} · En curso</span>
+      <div class="card card-admin">
+        <div class="card-title">🧩 Cómo armar las zonas</div>
+        <p class="help" style="margin:0;">A cada equipo elegile la zona donde va a jugar en el menú de al lado. Se guarda solo, apenas lo elegís. Los equipos con borde rojo todavía no tienen zona. Con ✏️ cambiás el nombre, con 📷 el escudo y con 🗑️ lo borrás.</p>
+      </div>
+      <div class="card">
+        <div class="card-title">📋 Cuántos equipos tiene cada zona</div>
+        ${conteos}
+      </div>
+      <div class="card card-admin">
+        <div class="card-title">➕ Agregar equipo nuevo</div>
+        <div class="field">
+          <label for="nuevoEquipoArmado">Nombre del equipo</label>
+          <input type="text" id="nuevoEquipoArmado" placeholder="Ej: Los Amigos FC">
+        </div>
+        <button class="btn btn-primary btn-block" onclick="addEquipoArmado()">Agregar equipo</button>
+      </div>
+      <div class="card">
+        <div class="card-title">🛡️ Todos los equipos (${todos.length})</div>
+        ${filas || '<p class="empty-note">Todavía no hay equipos.</p>'}
+      </div>
+      <button class="btn btn-gold btn-block" onclick="goHome()">✅ Listo, ir al torneo</button>
+    </div>`;
+}
+function goAdminVolver(){ goHome(); }
 
 /* =======================================================================
    DESCARGA DE TABLA
@@ -773,10 +994,13 @@ function renderTopbar(title, showBack, onBack){
 
 /* Campeones enmarcados */
 function renderCampeones(ed){
+  if(state.errorCampeones[ed.id]){
+    return `<div class="banner"><span>⚠️ No se pudieron cargar los campeones (problema de conexión).</span><button class="btn btn-primary" onclick="reintentarCampeones()">Reintentar</button></div>`;
+  }
   const camp = state.campeones[ed.id] || {};
   const lista = [];
   Object.values(TORNEOS).forEach(t=>t.zonas.forEach(z=>{
-    const c = camp[t.id+'-'+z.id] || (t.zonas.length===1 ? camp[t.id] : null);
+    const c = camp[t.id+'-'+z.id];
     if(c) lista.push({t,z,c});
   }));
   const items = lista.map(({t,z,c})=>{
@@ -853,7 +1077,8 @@ function renderHistorial(){
         <div class="hist-sub">Torneo finalizado${resumenNombres(ed) ? ' · '+escapeHtml(resumenNombres(ed)) : ''}</div>
         ${champs || '<p class="empty-note">No se registraron campeones en este torneo.</p>'}
         <button class="btn btn-outline btn-block" onclick="verEdicion('${ed.id}')">Ver tablas y resultados de este torneo</button>
-        ${state.admin ? `<button class="btn btn-outline btn-block" style="margin-top:10px;" onclick="renombrarEdicion('${ed.id}')">✏️ Cambiar nombre del torneo</button>` : ''}
+        ${state.admin ? `<button class="btn btn-outline btn-block" style="margin-top:10px;" onclick="renombrarEdicion('${ed.id}')">✏️ Cambiar nombre del torneo</button>
+        <button class="btn btn-outline btn-block" style="margin-top:10px;" onclick="goEditarCampeones('${ed.id}')">🏆 Corregir o agregar campeones</button>` : ''}
       </div>`;
   }).join('');
   document.getElementById('app').innerHTML = `
@@ -867,13 +1092,42 @@ function renderHistorial(){
 /* =======================================================================
    RENDER: ADMINISTRAR TORNEO
    ======================================================================= */
-function opcionesCampeon(ed, torneo, zona){
+function opcionesCampeon(ed, torneo, zona, elegidoId){
   let html = '<option value="">— Elegí al campeón —</option>';
   const c = state.cache[ckey(ed.id,torneo.id,zona.id)];
   if(!c) return html;
   const tabla = computeTabla(c.equipos, c.fechas);
-  html += tabla.map((e,i)=>`<option value="${e.id}" ${i===0 && e.pj>0 ? 'selected':''}>${i+1}° ${escapeHtml(e.nombre)} (${e.pts} pts)</option>`).join('');
+  html += tabla.map((e,i)=>{
+    const sel = elegidoId ? e.id===elegidoId : (i===0 && e.pj>0);
+    return `<option value="${e.id}" ${sel?'selected':''}>${i+1}° ${escapeHtml(e.nombre)} (${e.pts} pts)</option>`;
+  }).join('');
   return html;
+}
+function renderEditarCampeones(){
+  const ed = state.ediciones.find(e=>e.id===state.edicionEdit);
+  if(!ed){ goHistorial(); return; }
+  const camp = state.campeones[ed.id] || {};
+  const listo = Object.values(TORNEOS).every(t=>t.zonas.every(z=>state.cache[ckey(ed.id,t.id,z.id)]));
+  const cuerpo = !listo ? '<p class="loader-note">Cargando equipos…</p>' : `
+    <div class="card card-admin">
+      <div class="card-title">🏆 Campeones de ${escapeHtml(nombreEdicion(ed))}</div>
+      <p class="help">Elegí o corregí el campeón de cada zona. Si un campeón no está en la lista, dejalo en blanco.</p>
+      ${Object.values(TORNEOS).map(t=>t.zonas.map(z=>{
+        const actual = camp[t.id+'-'+z.id];
+        return `
+        <div class="field">
+          <label for="camp-${t.id}-${z.id}">Campeón: ${escapeHtml(t.zonas.length>1 ? t.nombre+' · '+z.nombre : t.nombre)}</label>
+          <select id="camp-${t.id}-${z.id}">${opcionesCampeon(ed,t,z, actual ? actual.equipoId : '__ninguno__')}</select>
+        </div>`;
+      }).join('')).join('')}
+      <div class="btn-row">
+        <button class="btn btn-gold" onclick="guardarCampeonesEditados()">Guardar campeones</button>
+        <button class="btn btn-outline" onclick="goHistorial()">Cancelar</button>
+      </div>
+    </div>`;
+  document.getElementById('app').innerHTML = `
+    ${renderTopbar('Corregir campeones', true, 'goHistorial()')}
+    <div class="wrap section">${cuerpo}</div>`;
 }
 function renderAdminTorneo(){
   const ed = ultimaEdicion();
@@ -895,6 +1149,11 @@ function renderAdminTorneo(){
         <button class="btn btn-primary btn-block" onclick="guardarDatosTorneo()">Guardar nombre y fecha</button>
       </div>
       <div class="card card-admin">
+        <div class="card-title">🧩 Armar las zonas</div>
+        <p class="help">Asigná cada equipo a su zona, agregá equipos nuevos o borrá los que no siguen.</p>
+        <button class="btn btn-primary btn-block" onclick="goArmarZonas()">Armar zonas y equipos</button>
+      </div>
+      <div class="card card-admin">
         <div class="card-title">🏁 Terminar el torneo y guardar campeones</div>
         <p class="help">Hay tres campeones: el del +50, el de la Zona A del +40 y el de la Zona B del +40. Ya aparece elegido el que va primero en cada tabla; cambialo si hace falta. Después de terminar, ya no se pueden cargar resultados.</p>
         ${Object.values(TORNEOS).map(t=>t.zonas.map(z=>`
@@ -910,11 +1169,12 @@ function renderAdminTorneo(){
         <div class="card-title">✅ ${escapeHtml(nombreEdicion(ed))} está terminado</div>
         ${renderCampeones(ed)}
         <button class="btn btn-outline btn-block" style="margin-bottom:10px;" onclick="renombrarEdicion('${ed.id}')">✏️ Cambiar nombre del torneo</button>
+        <button class="btn btn-outline btn-block" style="margin-bottom:10px;" onclick="goEditarCampeones('${ed.id}')">🏆 Corregir o agregar campeones</button>
         <button class="btn btn-danger btn-block" onclick="reabrirTorneo()">↩️ Volver a abrir este torneo (para corregir algo)</button>
       </div>
       <div class="card card-admin">
         <div class="card-title">🆕 Crear torneo nuevo</div>
-        <p class="help">Se guardan los equipos y escudos del torneo anterior. Después, dentro de cada zona, en la pestaña "Equipos" podés agregar equipos nuevos o borrar los que no sigan.</p>
+        <p class="help">Se guardan todos los equipos y escudos del torneo anterior, pero quedan <b>sin zona</b>: las zonas se arman de nuevo. Al crear el torneo te llevo directo a la pantalla para asignarlos, agregar equipos nuevos o borrar los que no siguen.</p>
         ${Object.values(TORNEOS).map(t=>`
         <div class="field">
           <label for="nuevoNombre-${t.id}">Nombre del ${escapeHtml(t.nombre)} nuevo (opcional)</label>
@@ -1008,7 +1268,7 @@ function renderTablaHTML(){
   const editar = puedeEditar();
   const tabla = computeTabla(c.equipos, c.fechas);
   if(!c.equipos.length){
-    return `<p class="empty-note">Todavía no hay equipos cargados en esta zona.${editar?' Andá a la pestaña "Equipos" para agregarlos.':''}</p>`;
+    return `<p class="empty-note">Todavía no hay equipos en esta zona.${editar?' Armalas desde el inicio → "Administrar torneo" → "Armar zonas y equipos", o agregá equipos en la pestaña "Equipos".':''}</p>`;
   }
   const filas = tabla.map((e,i)=>`
     <tr>
@@ -1184,6 +1444,8 @@ function render(){
   else if(state.view==='torneo') renderTorneoView();
   else if(state.view==='historial') renderHistorial();
   else if(state.view==='adminTorneo') renderAdminTorneo();
+  else if(state.view==='editarCampeones') renderEditarCampeones();
+  else if(state.view==='armarZonas') renderArmarZonas();
   renderToast();
 }
 
