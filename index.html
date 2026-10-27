@@ -1316,9 +1316,38 @@ function renderEditarCampeones(){
     ${renderTopbar('Corregir campeones', true, 'goHistorial()')}
     <div class="wrap section">${cuerpo}</div>`;
 }
+async function descartarTorneoActual(){
+  if(state.ediciones.length<2){ alert('No hay un torneo anterior al que volver.'); return; }
+  const ed = ultimaEdicion();
+  const previo = state.ediciones[state.ediciones.length-2];
+  const tareas = [];
+  Object.values(TORNEOS).forEach(t=>t.zonas.forEach(z=>tareas.push(ensureZonaData(ed.id,t.id,z.id))));
+  await Promise.all(tareas);
+  let hayPartidos = false;
+  Object.values(TORNEOS).forEach(t=>t.zonas.forEach(z=>{
+    const c = state.cache[ckey(ed.id,t.id,z.id)];
+    if(c && c.fechas.some(f=>(f.partidos||[]).length>0)) hayPartidos = true;
+  }));
+  if(hayPartidos){ alert('Este torneo ya tiene partidos cargados, por seguridad no se puede descartar.'); render(); return; }
+  if(!confirm('¿Descartar "'+nombreEdicion(ed)+'" (todavía no tiene partidos) y volver a "'+nombreEdicion(previo)+'"?\n\nSe pierde el armado de zonas del torneo nuevo. El torneo anterior queda como estaba y lo podés reabrir.')) return;
+  state.ediciones.pop();
+  if(!(await saveEdiciones())){ state.ediciones.push(ed); render(); return; }
+  state.edicionId = previo.id;
+  state.view = 'adminTorneo';
+  render(); window.scrollTo(0,0);
+  showToast('Torneo nuevo descartado ✔ Volviste a '+nombreEdicion(previo));
+}
 function renderAdminTorneo(){
   const ed = ultimaEdicion();
   let cuerpo = '';
+  if(state.ediciones.length>1){
+    cuerpo += `
+      <div class="card">
+        <div class="card-title">↩️ ¿Creaste un torneo nuevo antes de tiempo?</div>
+        <p class="help">Si el torneo nuevo todavía no tiene partidos cargados, lo podés descartar y volver al torneo anterior para reabrirlo y seguir cargando resultados.</p>
+        <button class="btn btn-danger btn-block" onclick="descartarTorneoActual()">Descartar este torneo nuevo y volver al anterior</button>
+      </div>`;
+  }
   if(!ed.cerrada){
     cuerpo += `
       <div class="card card-admin">
