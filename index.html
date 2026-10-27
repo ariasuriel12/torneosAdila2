@@ -1221,6 +1221,7 @@ function renderHome(){
         </div>
         ${bloques}
         <div class="tcard-cta">Ver ${unaZona?'tabla completa y resultados':'zonas'} →</div>
+        ${state.admin && esActual && fin ? `<button class="btn btn-danger btn-block" style="margin-top:10px;" onclick="event.stopPropagation();reabrirTorneo('${t.id}')">↩️ Volver a abrir este torneo</button>` : ''}
       </div>`;
   }).join('');
   document.getElementById('app').innerHTML = `
@@ -1245,6 +1246,7 @@ function renderHome(){
         Este link se puede compartir con todos: cualquiera puede ver las tablas y resultados.
         Solo los administradores pueden cargar o modificar datos.
       </p>
+      <p style="text-align:center;color:#a39e8d;font-size:.8rem;margin-top:8px;">Versión 26/10/2026 · cierre por torneo</p>
     </div>
   `;
 }
@@ -1463,6 +1465,11 @@ function renderTorneoView(){
     ${renderTopbar(titulo, true, backAction)}
     <div class="wrap section">
       <span class="ed-chip ${torneoCerrado(ed, torneo.id)?'fin':''}">${escapeHtml(nombreEdicion(ed, torneo.id))}${torneoCerrado(ed, torneo.id)?' · Finalizado (solo lectura)':''}</span>
+      ${state.admin && torneoCerrado(ed, torneo.id) && ed.id===ultimaEdicion().id ? `
+        <div class="banner" style="margin-top:0;">
+          <span>🏁 Este torneo está terminado: no se pueden cargar resultados.</span>
+          <button class="btn btn-danger" onclick="reabrirTorneo('${torneo.id}')">↩️ Volver a abrir este torneo</button>
+        </div>` : ''}
       ${tabs}
       ${body}
     </div>`;
