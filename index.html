@@ -183,6 +183,7 @@
   .match-admin-row{ display:flex; align-items:center; justify-content:space-between; margin-top:14px; gap:10px; flex-wrap:wrap; border-top:1px solid rgba(255,255,255,.15); padding-top:12px; }
   .jugado-check{ display:flex; align-items:center; gap:8px; font-weight:700; font-size:.9rem; }
   .jugado-check input{ width:22px; height:22px; }
+  .cruce-tag{ text-align:center; font-family:'Anton',sans-serif; letter-spacing:.08em; font-size:.85rem; color:var(--dorado-claro); margin:-4px 0 12px; }
   .libre-card{ background:var(--dorado); color:var(--verde-oscuro); border-radius:16px; padding:16px; margin-bottom:14px; display:flex; align-items:center; gap:12px; font-weight:800; }
 
   /* ---------- Forms ---------- */
@@ -456,12 +457,18 @@ function computeTabla(equipos, fechas){
     (f.partidos||[]).forEach(p=>{
       if(!p.jugado) return;
       const l = stats[p.localId], v = stats[p.visitanteId];
-      if(!l || !v) return;
+      /* En un cruce entre zonas solo uno de los dos equipos es de esta zona: se suma el que está acá. */
+      if(p.cruce ? (!l && !v) : (!l || !v)) return;
       const gl = Number(p.golesLocal)||0, gv = Number(p.golesVisitante)||0;
-      l.pj++; v.pj++; l.gf+=gl; l.gc+=gv; v.gf+=gv; v.gc+=gl;
-      if(gl>gv){ l.pg++; l.pts+=3; v.pp++; }
-      else if(gl<gv){ v.pg++; v.pts+=3; l.pp++; }
-      else { l.pe++; v.pe++; l.pts+=1; v.pts+=1; }
+      const sumar = (eq, gf, gc)=>{
+        if(!eq) return;
+        eq.pj++; eq.gf+=gf; eq.gc+=gc;
+        if(gf>gc){ eq.pg++; eq.pts+=3; }
+        else if(gf<gc){ eq.pp++; }
+        else { eq.pe++; eq.pts+=1; }
+      };
+      sumar(l, gl, gv);
+      sumar(v, gv, gl);
     });
   });
   const arr = Object.values(stats);
@@ -488,6 +495,8 @@ async function enterZona(torneoId, zonaId){
   state.torneoId=torneoId; state.zonaId=zonaId; state.view='torneo'; state.subview='tabla'; state.fechaActual=null;
   const ok = await ensureZonaData(state.edicionId, torneoId, zonaId);
   if(!ok){ goHome(); return; }
+  /* Se cargan también las otras zonas del torneo, para poder armar cruces entre zonas. */
+  await Promise.all(TORNEOS[torneoId].zonas.filter(z=>z.id!==zonaId).map(z=>ensureZonaData(state.edicionId, torneoId, z.id)));
   const c = getCache();
   if(c && c.fechas.length){ state.fechaActual = c.fechas[c.fechas.length-1].numero; }
   render();
@@ -545,6 +554,7 @@ async function eliminarEquipo(equipoId){
     saveEquipos(state.edicionId, state.torneoId, state.zonaId, c.equipos),
     saveFechas(state.edicionId, state.torneoId, state.zonaId, c.fechas)
   ]);
+  await limpiarCrucesHuerfanos(state.edicionId, state.torneoId);
   render(); showToast('Equipo eliminado');
 }
 async function renombrarEquipo(equipoId){
@@ -615,12 +625,85 @@ async function agregarPartido(){
   fecha.partidos.push({ id:uid(), localId, visitanteId, golesLocal:0, golesVisitante:0, jugado:false });
   if(await saveFechas(state.edicionId, state.torneoId, state.zonaId, c.fechas)){ render(); showToast('Partido agregado ✔'); }
 }
-async function eliminarPartido(partidoId){
-  if(!confirm('¿Eliminar este partido?')) return;
+/* ---- Cruces entre zonas: el mismo partido vive en las dos zonas y se mantiene igual en ambas ---- */
+function buscarEquipoTorneo(equipoId){
+  const t = TORNEOS[state.torneoId]; if(!t) return null;
+  for(const z of t.zonas){
+    const c = state.cache[ckey(state.edicionId, t.id, z.id)];
+    const eq = c && c.equipos.find(e=>e.id===equipoId);
+    if(eq) return eq;
+  }
+  return null;
+}
+async function sincronizarCruce(p, numero, borrar){
+  const otraZ = p.zonaLocal===state.zonaId ? p.zonaVisitante : p.zonaLocal;
+  if(!(await ensureZonaData(state.edicionId, state.torneoId, otraZ))) return false;
+  const c2 = state.cache[ckey(state.edicionId, state.torneoId, otraZ)];
+  const f2 = c2.fechas.find(f=>f.numero===numero);
+  if(!f2) return true;
+  if(borrar){ f2.partidos = (f2.partidos||[]).filter(x=>x.id!==p.id); }
+  else {
+    const q = (f2.partidos||[]).find(x=>x.id===p.id);
+    if(!q) return true;
+    q.golesLocal = p.golesLocal; q.golesVisitante = p.golesVisitante; q.jugado = p.jugado;
+  }
+  return saveFechas(state.edicionId, state.torneoId, otraZ, c2.fechas);
+}
+async function agregarCruce(){
+  const torneo = TORNEOS[state.torneoId];
+  const otraZ = torneo.zonas.find(z=>z.id!==state.zonaId);
   const c = getCache();
   const fecha = c.fechas.find(f=>f.numero===state.fechaActual);
-  fecha.partidos = fecha.partidos.filter(p=>p.id!==partidoId);
+  const c2 = otraZ && state.cache[ckey(state.edicionId, state.torneoId, otraZ.id)];
+  const f2 = c2 && c2.fechas.find(f=>f.numero===state.fechaActual);
+  if(!fecha || !f2){ alert('La otra zona todavía no tiene esta fecha creada.'); return; }
+  const miId = document.getElementById('cruceMio').value;
+  const otroId = document.getElementById('cruceOtro').value;
+  if(!miId || !otroId){ alert('Elegí el equipo libre de cada zona.'); return; }
+  const mio = c.equipos.find(e=>e.id===miId), otro = c2.equipos.find(e=>e.id===otroId);
+  if(!mio || !otro) return;
+  const p = {
+    id:uid(), cruce:true, localId:miId, visitanteId:otroId, zonaLocal:state.zonaId, zonaVisitante:otraZ.id,
+    ext:{ [miId]:{ nombre:mio.nombre }, [otroId]:{ nombre:otro.nombre } },
+    golesLocal:0, golesVisitante:0, jugado:false
+  };
+  fecha.partidos = fecha.partidos || []; f2.partidos = f2.partidos || [];
+  fecha.partidos.push(p);
+  f2.partidos.push(JSON.parse(JSON.stringify(p)));
+  const ok1 = await saveFechas(state.edicionId, state.torneoId, state.zonaId, c.fechas);
+  const ok2 = await saveFechas(state.edicionId, state.torneoId, otraZ.id, c2.fechas);
+  render();
+  if(ok1 && ok2) showToast('Cruce agregado ✔');
+}
+/* Si un equipo se borra o cambia de zona, se quitan los cruces que ya no tienen sentido. */
+async function limpiarCrucesHuerfanos(edId, torneoId){
+  const t = TORNEOS[torneoId]; if(!t || t.zonas.length<2) return;
+  const zs = t.zonas.map(z=>({ z, c:state.cache[ckey(edId,t.id,z.id)] }));
+  if(zs.some(x=>x.c==null)) return;
+  for(const x of zs){
+    const otra = zs.find(y=>y.z.id!==x.z.id).c;
+    let cambio = false;
+    x.c.fechas.forEach(f=>{
+      const antes = (f.partidos||[]).length;
+      f.partidos = (f.partidos||[]).filter(p=>{
+        if(!p.cruce) return true;
+        const l = x.c.equipos.some(e=>e.id===p.localId), v = x.c.equipos.some(e=>e.id===p.visitanteId);
+        const lo = otra.equipos.some(e=>e.id===p.localId), vo = otra.equipos.some(e=>e.id===p.visitanteId);
+        return (l && vo) || (v && lo);
+      });
+      if(f.partidos.length!==antes) cambio = true;
+    });
+    if(cambio) await saveFechas(edId, t.id, x.z.id, x.c.fechas);
+  }
+}
+async function eliminarPartido(partidoId){
+  const c = getCache();
+  const fecha = c.fechas.find(f=>f.numero===state.fechaActual);
+  const p = fecha.partidos.find(x=>x.id===partidoId);
+  if(!confirm(p && p.cruce ? '¿Eliminar este cruce? También se borra en la otra zona y los dos equipos vuelven a quedar libres.' : '¿Eliminar este partido?')) return;
+  fecha.partidos = fecha.partidos.filter(x=>x.id!==partidoId);
   await saveFechas(state.edicionId, state.torneoId, state.zonaId, c.fechas);
+  if(p && p.cruce) await sincronizarCruce(p, fecha.numero, true);
   render();
 }
 async function guardarResultado(partidoId){
@@ -630,7 +713,10 @@ async function guardarResultado(partidoId){
   p.golesLocal = Math.max(0, parseInt(document.getElementById('gl-'+partidoId).value,10)||0);
   p.golesVisitante = Math.max(0, parseInt(document.getElementById('gv-'+partidoId).value,10)||0);
   p.jugado = document.getElementById('jg-'+partidoId).checked;
-  if(await saveFechas(state.edicionId, state.torneoId, state.zonaId, c.fechas)){ render(); showToast('Resultado guardado ✔'); }
+  if(await saveFechas(state.edicionId, state.torneoId, state.zonaId, c.fechas)){
+    if(p.cruce) await sincronizarCruce(p, fecha.numero, false);
+    render(); showToast('Resultado guardado ✔');
+  }
 }
 function stepScore(partidoId, campo, delta){
   const el = document.getElementById(campo+'-'+partidoId);
@@ -639,8 +725,12 @@ function stepScore(partidoId, campo, delta){
 async function eliminarFecha(){
   if(!confirm('¿Eliminar esta fecha completa junto con sus partidos cargados?')) return;
   const c = getCache();
-  c.fechas = c.fechas.filter(f=>f.numero!==state.fechaActual);
+  const numero = state.fechaActual;
+  const fechaBorrada = c.fechas.find(f=>f.numero===numero);
+  const cruces = fechaBorrada ? (fechaBorrada.partidos||[]).filter(p=>p.cruce) : [];
+  c.fechas = c.fechas.filter(f=>f.numero!==numero);
   await saveFechas(state.edicionId, state.torneoId, state.zonaId, c.fechas);
+  for(const p of cruces) await sincronizarCruce(p, numero, true);
   state.fechaActual = c.fechas.length ? c.fechas[c.fechas.length-1].numero : null;
   render();
 }
@@ -816,6 +906,7 @@ async function moverEquipo(equipoId, valor){
   render();
   const ok1 = await guardarZonaCache(ed.id, dest);
   const ok2 = await guardarZonaCache(ed.id, ub.d);
+  await limpiarCrucesHuerfanos(ed.id, 'masCuarenta');
   if(ok1 && ok2) showToast(`${ub.eq.nombre} → ${dest.label} ✔`);
 }
 async function addEquipoArmado(){
@@ -835,7 +926,9 @@ async function eliminarEquipoArmado(equipoId){
   ub.c.equipos = ub.c.equipos.filter(e=>e.id!==equipoId);
   ub.c.fechas.forEach(f=>{ f.partidos = (f.partidos||[]).filter(p=>p.localId!==equipoId && p.visitanteId!==equipoId); });
   render();
-  if(await guardarZonaCache(ed.id, ub.d)) showToast('Equipo borrado');
+  const okBorrado = await guardarZonaCache(ed.id, ub.d);
+  await limpiarCrucesHuerfanos(ed.id, 'masCuarenta');
+  if(okBorrado) showToast('Equipo borrado');
 }
 async function renombrarEquipoArmado(equipoId){
   const ed = ultimaEdicion();
@@ -1337,7 +1430,7 @@ function renderFixtureHTML(){
           <button class="btn btn-primary btn-block" onclick="agregarPartido()">Agregar partido</button>
         </div>` : `
         <div class="card card-admin"><p class="help" style="margin:0;">✅ Ya no quedan equipos para armar más partidos en esta fecha.${disp.length===1?' El equipo que sobra queda libre.':''}</p></div>`;
-      contenido += form + `<button class="btn btn-danger btn-block" onclick="eliminarFecha()">🗑️ Eliminar esta fecha</button>`;
+      contenido += form + renderCruceCard(fecha) + `<button class="btn btn-danger btn-block" onclick="eliminarFecha()">🗑️ Eliminar esta fecha</button>`;
     }
   }
 
@@ -1347,9 +1440,53 @@ function renderFixtureHTML(){
     ${contenido}`;
 }
 
+function renderCruceCard(fecha){
+  const torneo = TORNEOS[state.torneoId];
+  if(torneo.zonas.length<2) return '';
+  const zActual = torneo.zonas.find(z=>z.id===state.zonaId);
+  const otraZ = torneo.zonas.find(z=>z.id!==state.zonaId);
+  const c2 = state.cache[ckey(state.edicionId, state.torneoId, otraZ.id)];
+  const mios = equiposLibres(fecha);
+  let otros = [], otraTieneFecha = false;
+  if(c2){
+    const f2 = c2.fechas.find(f=>f.numero===fecha.numero);
+    if(f2 && (f2.partidos||[]).length){
+      otraTieneFecha = true;
+      const usados = equiposConRival(f2);
+      otros = c2.equipos.filter(e=>!usados.has(e.id));
+    }
+  }
+  const titulo = `<div class="card-title">🔀 Cruce entre zonas</div>`;
+  if(mios.length && otros.length){
+    const opt = (arr)=>arr.map(e=>`<option value="${e.id}">${escapeHtml(e.nombre)}</option>`).join('');
+    return `
+      <div class="card card-admin">
+        ${titulo}
+        <p class="help">Las dos zonas tienen un equipo libre en esta fecha. Si los hacés jugar entre sí, ninguno queda libre: el partido suma puntos y goles en la tabla de su zona.</p>
+        <div class="field">
+          <label for="cruceMio">Equipo libre de ${escapeHtml(zActual.nombre)}</label>
+          <select id="cruceMio">${opt(mios)}</select>
+        </div>
+        <div class="field">
+          <label for="cruceOtro">Equipo libre de ${escapeHtml(otraZ.nombre)}</label>
+          <select id="cruceOtro">${opt(otros)}</select>
+        </div>
+        <button class="btn btn-primary btn-block" onclick="agregarCruce()">Armar partido cruzado</button>
+      </div>`;
+  }
+  if(mios.length || otros.length){
+    const motivo = mios.length
+      ? (otraTieneFecha ? `${otraZ.nombre} no tiene equipo libre en esta fecha.` : `${otraZ.nombre} todavía no tiene partidos cargados en esta fecha.`)
+      : `${zActual.nombre} no tiene equipo libre en esta fecha.`;
+    return `<div class="card card-admin">${titulo}<p class="help" style="margin:0;">Para armar un cruce las dos zonas tienen que tener un equipo libre en la misma fecha. ${motivo}</p></div>`;
+  }
+  return '';
+}
+
 function renderMatchCard(p, c, editar){
-  const local = c.equipos.find(e=>e.id===p.localId) || { nombre:'—', escudo:null };
-  const visit = c.equipos.find(e=>e.id===p.visitanteId) || { nombre:'—', escudo:null };
+  const buscar = (id)=> c.equipos.find(e=>e.id===id) || buscarEquipoTorneo(id) || (p.ext && p.ext[id]) || { nombre:'—', escudo:null };
+  const local = buscar(p.localId);
+  const visit = buscar(p.visitanteId);
   const crest = (e)=> e.escudo ? `<img class="crest-md" src="${e.escudo}" alt="">` : `<div class="crest-md-ph">🛡️</div>`;
   const marcador = p.jugado
     ? `<div class="score-box"><span class="score-num">${p.golesLocal}</span><span class="vs-label">—</span><span class="score-num">${p.golesVisitante}</span></div>`
@@ -1377,6 +1514,7 @@ function renderMatchCard(p, c, editar){
   }
   return `
     <div class="match-card">
+      ${p.cruce ? `<div class="cruce-tag">🔀 CRUCE ENTRE ZONAS</div>` : ''}
       <div class="match-teams">
         <div class="match-team">${crest(local)}<div class="match-team-name">${escapeHtml(local.nombre)}</div></div>
         <div>${marcador}</div>
