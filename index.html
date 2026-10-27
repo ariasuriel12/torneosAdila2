@@ -86,7 +86,7 @@
   }
   .ed-chip{
     display:inline-block; background:var(--verde); color:var(--tiza); padding:7px 14px; border-radius:999px;
-    font-weight:700; font-size:.9rem; margin-bottom:4px;
+    font-weight:700; font-size:.9rem; margin-bottom:10px;
   }
   .ed-chip.fin{ background:var(--dorado); color:var(--verde-oscuro); }
 
@@ -183,6 +183,29 @@
   .match-admin-row{ display:flex; align-items:center; justify-content:space-between; margin-top:14px; gap:10px; flex-wrap:wrap; border-top:1px solid rgba(255,255,255,.15); padding-top:12px; }
   .jugado-check{ display:flex; align-items:center; gap:8px; font-weight:700; font-size:.9rem; }
   .jugado-check input{ width:22px; height:22px; }
+  /* ---------- Portada: tarjetas con tabla chica ---------- */
+  .torneo-list{ display:grid; gap:18px; max-width:820px; margin:-26px auto 0; padding:0 16px; position:relative; }
+  .tcard{ background:var(--blanco); border-radius:18px; padding:18px 16px 16px; box-shadow:0 10px 24px rgba(18,48,31,.18); cursor:pointer; }
+  .tcard:active{ transform:scale(.995); }
+  .tcard-head{ display:flex; align-items:center; gap:14px; margin-bottom:10px; }
+  .tcard-head .crest-slot{ width:60px; height:60px; font-size:1.6rem; flex-shrink:0; }
+  .tcard-name{ font-family:'Anton',sans-serif; font-size:1.3rem; color:var(--verde-oscuro); text-transform:uppercase; letter-spacing:.02em; }
+  .tcard-sub{ color:#6b6659; font-size:.9rem; font-weight:600; }
+  .tcard-ed{ color:var(--dorado); font-weight:800; font-size:.95rem; }
+  .tcard-cta{ margin-top:12px; text-align:center; font-weight:800; color:var(--verde); background:var(--tiza); border-radius:10px; padding:11px; }
+  .badge-fin{ display:inline-block; background:var(--dorado); color:var(--verde-oscuro); font-family:'Inter',sans-serif; font-size:.7rem; font-weight:800; padding:3px 9px; border-radius:999px; margin-left:8px; vertical-align:middle; letter-spacing:.03em; }
+  .mini-zona{ border:2px solid var(--linea); border-radius:12px; padding:8px 10px 10px; margin-top:10px; background:#FBFAF6; }
+  .mini-zona-title{ display:flex; justify-content:space-between; font-weight:800; font-size:.85rem; color:var(--verde); text-transform:uppercase; margin-bottom:4px; }
+  .mini-link{ color:var(--dorado); }
+  table.mini{ width:100%; border-collapse:collapse; font-size:.92rem; }
+  table.mini th{ font-size:.68rem; text-transform:uppercase; color:#6b6659; text-align:center; padding:4px 3px; }
+  table.mini td{ padding:6px 3px; text-align:center; border-top:1px solid var(--linea); }
+  table.mini td.eq{ text-align:left; font-weight:700; width:100%; max-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  table.mini td.pts{ font-weight:800; color:var(--verde-oscuro); }
+  table.mini tr.lider td{ background:#FDF6E3; }
+  .mini-crest, .mini-crest-ph{ width:20px; height:20px; border-radius:50%; object-fit:cover; vertical-align:middle; margin-right:7px; display:inline-block; font-size:.7rem; text-align:center; line-height:20px; background:var(--tiza); }
+  .mini-note{ color:#7a7566; font-size:.9rem; margin:6px 0 2px; }
+  .mini-more{ text-align:center; color:#7a7566; font-size:.82rem; font-weight:600; margin-top:6px; }
   .cruce-tag{ text-align:center; font-family:'Anton',sans-serif; letter-spacing:.08em; font-size:.85rem; color:var(--dorado-claro); margin:-4px 0 12px; }
   .libre-card{ background:var(--dorado); color:var(--verde-oscuro); border-radius:16px; padding:16px; margin-bottom:14px; display:flex; align-items:center; gap:12px; font-weight:800; }
 
@@ -350,9 +373,21 @@ function resumenNombres(ed){
     return n ? `${t.nombre.replace('Torneo ','')}: ${n}` : '';
   }).filter(Boolean).join(' · ');
 }
+/* Cada torneo (+50 / +40) se cierra por separado. Los torneos viejos cerrados completos cuentan como cerrados los dos. */
+function torneoCerrado(ed, torneoId){
+  return !!(ed && (ed.cerrada || (ed.cerradoT && ed.cerradoT[torneoId])));
+}
+function mapaCerrados(ed){
+  const m = {};
+  Object.values(TORNEOS).forEach(t=>{ m[t.id] = torneoCerrado(ed, t.id); });
+  return m;
+}
+function edicionTieneCierre(ed){
+  return !!(ed && (ed.cerrada || (ed.cerradoT && Object.values(ed.cerradoT).some(Boolean))));
+}
 function puedeEditar(){
   const ed = edicionVista();
-  return state.admin && ed && !ed.cerrada;
+  return state.admin && ed && !torneoCerrado(ed, state.torneoId);
 }
 
 /* =======================================================================
@@ -422,7 +457,7 @@ function normalizarCampeones(camp){
   return out;
 }
 async function loadCampeones(){
-  await Promise.all(state.ediciones.filter(e=>e.cerrada).map(e=>cargarCampeonesDe(e.id)));
+  await Promise.all(state.ediciones.filter(e=>edicionTieneCierre(e)).map(e=>cargarCampeonesDe(e.id)));
 }
 async function reintentarCampeones(){
   await loadCampeones();
@@ -479,12 +514,12 @@ function computeTabla(equipos, fechas){
 /* =======================================================================
    NAVEGACIÓN
    ======================================================================= */
-function goHome(){ state.view='home'; state.torneoId=null; state.zonaId=null; render(); }
+function goHome(){ state.view='home'; state.torneoId=null; state.zonaId=null; render(); if(state.edicionId) precargarEdicion(state.edicionId); }
 function goHistorial(){
   state.view='historial'; render();
   if(Object.keys(state.errorCampeones).length) loadCampeones().then(render);
 }
-function verEdicion(id){ state.edicionId=id; state.view='home'; state.torneoId=null; state.zonaId=null; render(); window.scrollTo(0,0); }
+function verEdicion(id){ state.edicionId=id; state.view='home'; state.torneoId=null; state.zonaId=null; render(); window.scrollTo(0,0); precargarEdicion(id); }
 function volverActual(){ verEdicion(ultimaEdicion().id); }
 function goTorneo(torneoId){
   const t = TORNEOS[torneoId];
@@ -789,27 +824,43 @@ async function guardarCampeonesEditados(){
     state.view='historial'; render(); showToast('Campeones guardados ✔');
   } else { state.campeones[ed.id] = previos; render(); }
 }
-async function terminarTorneo(){
+async function terminarTorneo(torneoId){
   const ed = ultimaEdicion();
+  const t = TORNEOS[torneoId];
   if(!ed.fechaInicio){ alert('Primero guardá la fecha en que empezó este torneo (primer recuadro). Con esa fecha se va a llamar el torneo en el historial.'); return; }
-  const campeones = recolectarCampeones(ed);
-  if(!Object.keys(campeones).length && !confirm('No elegiste ningún campeón. ¿Querés terminar el torneo igual?')) return;
-  if(!confirm('¿Terminar el torneo? Después no se van a poder cargar más resultados (solo verlos).')) return;
-  ed.cerrada = true;
-  state.campeones[ed.id] = campeones;
+  const nuevos = {};
+  const todos = recolectarCampeones(ed);
+  Object.keys(todos).forEach(k=>{ if(todos[k].torneoId===torneoId) nuevos[k] = todos[k]; });
+  if(!Object.keys(nuevos).length && !confirm('No elegiste ningún campeón. ¿Querés terminar el '+t.nombre+' igual?')) return;
+  if(!confirm('¿Terminar el '+t.nombre+'? Después no se van a poder cargar más resultados de este torneo (solo verlos). Si hace falta, lo podés volver a abrir.')) return;
+  const prev = { cerrada:ed.cerrada, cerradoT:ed.cerradoT, campeones:state.campeones[ed.id] };
+  const mapa = mapaCerrados(ed); mapa[torneoId] = true;
+  const camp = Object.assign({}, prev.campeones||{});
+  Object.keys(camp).forEach(k=>{ if(k.indexOf(torneoId+'-')===0) delete camp[k]; });
+  Object.assign(camp, nuevos);
+  ed.cerradoT = mapa;
+  ed.cerrada = Object.values(TORNEOS).every(x=>mapa[x.id]);
+  state.campeones[ed.id] = camp;
   const ok1 = await saveCampeones(ed.id);
   const ok2 = await saveEdiciones();
-  if(!ok1 || !ok2){ ed.cerrada=false; render(); return; }
-  render(); showToast('Torneo terminado ✔ Campeones guardados');
+  if(!ok1 || !ok2){ ed.cerrada = prev.cerrada; ed.cerradoT = prev.cerradoT; state.campeones[ed.id] = prev.campeones; render(); return; }
+  render(); showToast(t.nombre+' terminado ✔ Campeón guardado');
 }
-async function reabrirTorneo(){
-  if(!confirm('¿Volver a abrir el torneo para corregir datos? Se van a borrar los campeones guardados y vas a tener que elegirlos de nuevo al terminarlo.')) return;
+async function reabrirTorneo(torneoId){
   const ed = ultimaEdicion();
+  const t = TORNEOS[torneoId];
+  if(!confirm('¿Volver a abrir el '+t.nombre+'? Se va a poder cargar resultados de nuevo. Se borra el campeón guardado de este torneo y lo vas a elegir otra vez cuando lo termines.')) return;
+  const prev = { cerrada:ed.cerrada, cerradoT:ed.cerradoT, campeones:state.campeones[ed.id] };
+  const mapa = mapaCerrados(ed); mapa[torneoId] = false;
+  const camp = Object.assign({}, prev.campeones||{});
+  Object.keys(camp).forEach(k=>{ if(k.indexOf(torneoId+'-')===0) delete camp[k]; });
+  ed.cerradoT = mapa;
   ed.cerrada = false;
-  state.campeones[ed.id] = {};
-  await saveCampeones(ed.id);
-  await saveEdiciones();
-  render(); showToast('Torneo reabierto');
+  state.campeones[ed.id] = camp;
+  const ok1 = await saveCampeones(ed.id);
+  const ok2 = await saveEdiciones();
+  if(!ok1 || !ok2){ ed.cerrada = prev.cerrada; ed.cerradoT = prev.cerradoT; state.campeones[ed.id] = prev.campeones; render(); return; }
+  render(); showToast(t.nombre+' reabierto ✔');
 }
 async function crearNuevoTorneo(){
   const fecha = document.getElementById('nuevaFechaInicio').value;
@@ -1086,13 +1137,14 @@ function renderTopbar(title, showBack, onBack){
 }
 
 /* Campeones enmarcados */
-function renderCampeones(ed){
+function renderCampeones(ed, soloTorneoId){
   if(state.errorCampeones[ed.id]){
     return `<div class="banner"><span>⚠️ No se pudieron cargar los campeones (problema de conexión).</span><button class="btn btn-primary" onclick="reintentarCampeones()">Reintentar</button></div>`;
   }
   const camp = state.campeones[ed.id] || {};
   const lista = [];
   Object.values(TORNEOS).forEach(t=>t.zonas.forEach(z=>{
+    if(soloTorneoId && t.id!==soloTorneoId) return;
     const c = camp[t.id+'-'+z.id];
     if(c) lista.push({t,z,c});
   }));
@@ -1113,41 +1165,81 @@ function renderCampeones(ed){
 /* =======================================================================
    RENDER: HOME
    ======================================================================= */
+/* ---- Tabla chica para la portada y la pantalla de zonas ---- */
+async function cargarZonaSilencioso(edId, t, z){
+  const key = ckey(edId,t,z);
+  if(state.cache[key]) return;
+  try{
+    const [equipos, fechas] = await Promise.all([getEquipos(edId,t,z), getFechas(edId,t,z)]);
+    state.cache[key] = { equipos, fechas };
+  }catch(e){ console.error('No se pudo precargar', key, e); }
+}
+async function precargarEdicion(edId){
+  const tareas = [];
+  Object.values(TORNEOS).forEach(t=>t.zonas.forEach(z=>tareas.push(cargarZonaSilencioso(edId,t.id,z.id))));
+  await Promise.all(tareas);
+  if((state.view==='home' || state.view==='zonaSelect') && state.edicionId===edId) render();
+}
+function miniTabla(edId, t, z, max){
+  const c = state.cache[ckey(edId,t.id,z.id)];
+  if(!c) return '<p class="mini-note">Cargando tabla…</p>';
+  if(!c.equipos.length) return '<p class="mini-note">Todavía no hay equipos cargados.</p>';
+  const tabla = computeTabla(c.equipos, c.fechas);
+  const filas = tabla.slice(0,max).map((e,i)=>`
+    <tr class="${i===0 && e.pj>0 ? 'lider':''}">
+      <td>${i+1}</td>
+      <td class="eq">${e.escudo?`<img class="mini-crest" src="${e.escudo}" alt="">`:'<span class="mini-crest-ph">🛡️</span>'}${escapeHtml(e.nombre)}</td>
+      <td>${e.pj}</td><td>${e.gf-e.gc}</td><td class="pts">${e.pts}</td>
+    </tr>`).join('');
+  const mas = tabla.length>max ? `<div class="mini-more">y ${tabla.length-max} equipo${tabla.length-max===1?'':'s'} más…</div>` : '';
+  return `<table class="mini"><thead><tr><th>#</th><th style="text-align:left;">Equipo</th><th>PJ</th><th>DIF</th><th>PTS</th></tr></thead><tbody>${filas}</tbody></table>${mas}`;
+}
 function renderHome(){
   const ed = edicionVista();
   const esActual = ed.id === ultimaEdicion().id;
-  const logoV = state.logos.veteranos50, logoM = state.logos.masCuarenta;
-  const champs = ed.cerrada ? renderCampeones(ed) : '';
+  const champs = edicionTieneCierre(ed) ? renderCampeones(ed) : '';
+  const tarjetas = Object.values(TORNEOS).map(t=>{
+    const logo = state.logos[t.id];
+    const nombreEd = nombreTorneoEd(ed, t.id);
+    const fin = torneoCerrado(ed, t.id);
+    const unaZona = t.zonas.length===1;
+    const bloques = t.zonas.map(z=>{
+      const tabla = miniTabla(ed.id, t, z, 5);
+      if(unaZona) return `<div class="mini-zona">${tabla}</div>`;
+      return `<div class="mini-zona" onclick="event.stopPropagation();enterZona('${t.id}','${z.id}')">
+        <div class="mini-zona-title"><span>${escapeHtml(z.nombre)}</span><span class="mini-link">Ver zona →</span></div>${tabla}</div>`;
+    }).join('');
+    return `
+      <div class="tcard" role="button" tabindex="0" onclick="goTorneo('${t.id}')" onkeydown="if(event.key==='Enter')goTorneo('${t.id}')">
+        <div class="tcard-head">
+          <div class="crest-slot">${logo?`<img src="${logo}" alt="">`:'🏆'}</div>
+          <div style="min-width:0;">
+            <div class="tcard-name">${escapeHtml(t.id==='veteranos50' ? 'Veteranos +50' : '+40')}${fin?'<span class="badge-fin">🏁 FINALIZADO</span>':''}</div>
+            <div class="tcard-sub">${unaZona ? 'Zona única' : 'Zona A y Zona B'}</div>
+            ${nombreEd ? `<div class="tcard-ed">${escapeHtml(nombreEd)}</div>` : ''}
+          </div>
+        </div>
+        ${bloques}
+        <div class="tcard-cta">Ver ${unaZona?'tabla completa y resultados':'zonas'} →</div>
+      </div>`;
+  }).join('');
   document.getElementById('app').innerHTML = `
     ${renderTopbar('Torneos Adila', false)}
     <div class="hero">
       <h1>Torneos Adila</h1>
       <p>${escapeHtml(nombreEdicion(ed))}${ed.cerrada?' · Finalizado':''}</p>
     </div>
-    <div class="torneo-grid">
-      <button class="torneo-card" onclick="goTorneo('veteranos50')">
-        <div class="crest-slot">${logoV?`<img src="${logoV}" alt="">`:'🏆'}</div>
-        <div class="torneo-card-name">Veteranos +50</div>
-        <div class="torneo-card-sub">Zona única</div>
-        ${nombreTorneoEd(ed,'veteranos50') ? `<div class="torneo-card-sub" style="color:var(--dorado);font-weight:800;margin-top:-4px;">${escapeHtml(nombreTorneoEd(ed,'veteranos50'))}</div>` : ''}
-      </button>
-      <button class="torneo-card" onclick="goTorneo('masCuarenta')">
-        <div class="crest-slot">${logoM?`<img src="${logoM}" alt="">`:'🏆'}</div>
-        <div class="torneo-card-name">+40</div>
-        <div class="torneo-card-sub">Zona A y Zona B</div>
-        ${nombreTorneoEd(ed,'masCuarenta') ? `<div class="torneo-card-sub" style="color:var(--dorado);font-weight:800;margin-top:-4px;">${escapeHtml(nombreTorneoEd(ed,'masCuarenta'))}</div>` : ''}
-      </button>
-    </div>
+    <div class="torneo-list">${tarjetas}</div>
     <div class="wrap">
       ${!esActual ? `
         <div class="banner">
           <span>📜 Estás viendo un torneo anterior</span>
           <button class="btn btn-primary" onclick="volverActual()">Ir al torneo actual</button>
         </div>` : ''}
-      ${ed.cerrada && champs ? `<h2 class="champ-title">🏆 Campeones del torneo</h2>${champs}` : ''}
+      ${champs ? `<h2 class="champ-title">🏆 Campeones</h2>${champs}` : ''}
       <div class="home-actions">
         <button class="btn btn-gold btn-block" onclick="goHistorial()">📜 Historial de torneos y campeones</button>
-        ${state.admin && esActual ? `<button class="btn btn-outline btn-block" onclick="goAdminTorneo()">⚙️ Administrar torneo (terminar / crear nuevo)</button>` : ''}
+        ${state.admin && esActual ? `<button class="btn btn-outline btn-block" onclick="goAdminTorneo()">⚙️ Administrar torneo (terminar / reabrir / crear nuevo)</button>` : ''}
       </div>
       <p style="text-align:center;color:#6b6659;font-weight:600;margin-top:26px;">
         Este link se puede compartir con todos: cualquiera puede ver las tablas y resultados.
@@ -1226,10 +1318,10 @@ function renderAdminTorneo(){
   const ed = ultimaEdicion();
   let cuerpo = '';
   if(!ed.cerrada){
-    cuerpo = `
+    cuerpo += `
       <div class="card card-admin">
         <div class="card-title">📅 Nombres y fecha de este torneo</div>
-        <p class="help">El +50 y el +40 pueden tener cada uno su propio nombre (por ejemplo: Apertura 2026). Los nombres son opcionales. La fecha de inicio es obligatoria para poder terminar el torneo.</p>
+        <p class="help">El +50 y el +40 pueden tener cada uno su propio nombre (por ejemplo: Apertura 2026). Los nombres son opcionales. La fecha de inicio es obligatoria para poder terminar un torneo.</p>
         ${Object.values(TORNEOS).map(t=>`
         <div class="field">
           <label for="nombre-${t.id}">Nombre del ${escapeHtml(t.nombre)} (opcional)</label>
@@ -1245,25 +1337,39 @@ function renderAdminTorneo(){
         <div class="card-title">🧩 Armar las zonas</div>
         <p class="help">Asigná cada equipo a su zona, agregá equipos nuevos o borrá los que no siguen.</p>
         <button class="btn btn-primary btn-block" onclick="goArmarZonas()">Armar zonas y equipos</button>
-      </div>
-      <div class="card card-admin">
-        <div class="card-title">🏁 Terminar el torneo y guardar campeones</div>
-        <p class="help">Hay tres campeones: el del +50, el de la Zona A del +40 y el de la Zona B del +40. Ya aparece elegido el que va primero en cada tabla; cambialo si hace falta. Después de terminar, ya no se pueden cargar resultados.</p>
-        ${Object.values(TORNEOS).map(t=>t.zonas.map(z=>`
-          <div class="field">
-            <label for="camp-${t.id}-${z.id}">Campeón: ${escapeHtml(t.zonas.length>1 ? t.nombre+' · '+z.nombre : t.nombre)}</label>
-            <select id="camp-${t.id}-${z.id}">${opcionesCampeon(ed,t,z)}</select>
-          </div>`).join('')).join('')}
-        <button class="btn btn-gold btn-block" onclick="terminarTorneo()">🏆 Terminar torneo y guardar campeones</button>
       </div>`;
-  } else {
-    cuerpo = `
+  }
+  /* Cada torneo (+50 y +40) se termina y se reabre por separado. */
+  cuerpo += Object.values(TORNEOS).map(t=>{
+    if(torneoCerrado(ed, t.id)){
+      return `
       <div class="card">
-        <div class="card-title">✅ ${escapeHtml(nombreEdicion(ed))} está terminado</div>
-        ${renderCampeones(ed)}
-        <button class="btn btn-outline btn-block" style="margin-bottom:10px;" onclick="renombrarEdicion('${ed.id}')">✏️ Cambiar nombre del torneo</button>
-        <button class="btn btn-outline btn-block" style="margin-bottom:10px;" onclick="goEditarCampeones('${ed.id}')">🏆 Corregir o agregar campeones</button>
-        <button class="btn btn-danger btn-block" onclick="reabrirTorneo()">↩️ Volver a abrir este torneo (para corregir algo)</button>
+        <div class="card-title">✅ ${escapeHtml(t.nombre)} está terminado</div>
+        ${renderCampeones(ed, t.id) || '<p class="empty-note">No hay campeón registrado.</p>'}
+        <p class="help">No se pueden cargar resultados mientras esté terminado. Si hay que corregir algo o falta jugar, reabrilo: se borra el campeón guardado y lo volvés a elegir al terminarlo.</p>
+        <button class="btn btn-danger btn-block" onclick="reabrirTorneo('${t.id}')">↩️ Volver a abrir el ${escapeHtml(t.nombre)}</button>
+      </div>`;
+    }
+    const cant = t.zonas.length;
+    return `
+      <div class="card card-admin">
+        <div class="card-title">🏁 Terminar el ${escapeHtml(t.nombre)}</div>
+        <p class="help">Elegí ${cant>1?'el campeón de cada zona':'el campeón'}. Ya aparece elegido el que va primero en la tabla; cambialo si hace falta. Después de terminar, ya no se pueden cargar resultados de este torneo.</p>
+        ${t.zonas.map(z=>`
+          <div class="field">
+            <label for="camp-${t.id}-${z.id}">Campeón: ${escapeHtml(cant>1 ? t.nombre+' · '+z.nombre : t.nombre)}</label>
+            <select id="camp-${t.id}-${z.id}">${opcionesCampeon(ed,t,z)}</select>
+          </div>`).join('')}
+        <button class="btn btn-gold btn-block" onclick="terminarTorneo('${t.id}')">🏆 Terminar el ${escapeHtml(t.nombre)} y guardar campeón</button>
+      </div>`;
+  }).join('');
+
+  if(ed.cerrada){
+    cuerpo += `
+      <div class="card">
+        <div class="card-title">✅ ${escapeHtml(nombreEdicion(ed))}: los dos torneos están terminados</div>
+        <button class="btn btn-outline btn-block" style="margin-bottom:10px;" onclick="renombrarEdicion('${ed.id}')">✏️ Cambiar nombres de los torneos</button>
+        <button class="btn btn-outline btn-block" onclick="goEditarCampeones('${ed.id}')">🏆 Corregir o agregar campeones</button>
       </div>
       <div class="card card-admin">
         <div class="card-title">🆕 Crear torneo nuevo</div>
@@ -1279,6 +1385,8 @@ function renderAdminTorneo(){
         </div>
         <button class="btn btn-primary btn-block" onclick="crearNuevoTorneo()">Crear torneo nuevo</button>
       </div>`;
+  } else {
+    cuerpo += `<p class="empty-note" style="text-align:center;">Cuando los dos torneos estén terminados vas a poder crear el torneo nuevo.</p>`;
   }
   document.getElementById('app').innerHTML = `
     ${renderTopbar('Administrar torneo', true, 'goHome()')}
@@ -1293,16 +1401,29 @@ function renderAdminTorneo(){
    ======================================================================= */
 function renderZonaSelect(){
   const torneo = TORNEOS[state.torneoId];
+  const ed = edicionVista();
+  const fin = torneoCerrado(ed, torneo.id);
+  const tarjetas = torneo.zonas.map(z=>{
+    const c = state.cache[ckey(ed.id, torneo.id, z.id)];
+    const cant = c ? c.equipos.length : null;
+    return `
+      <div class="tcard" role="button" tabindex="0" onclick="enterZona('${torneo.id}','${z.id}')" onkeydown="if(event.key==='Enter')enterZona('${torneo.id}','${z.id}')">
+        <div class="tcard-head" style="margin-bottom:6px;">
+          <div style="flex:1;min-width:0;">
+            <div class="tcard-name">${escapeHtml(z.nombre)}</div>
+            ${cant!=null ? `<div class="tcard-sub">${cant} equipo${cant===1?'':'s'}</div>` : ''}
+          </div>
+        </div>
+        <div class="mini-zona">${miniTabla(ed.id, torneo, z, 6)}</div>
+        <div class="tcard-cta">Ver tabla completa y resultados →</div>
+      </div>`;
+  }).join('');
   document.getElementById('app').innerHTML = `
     ${renderTopbar(torneo.nombre, true, 'goHome()')}
     <div class="wrap section">
-      <span class="ed-chip ${edicionVista().cerrada?'fin':''}">${escapeHtml(nombreEdicion(edicionVista(), torneo.id))}</span>
+      <span class="ed-chip ${fin?'fin':''}">${escapeHtml(nombreEdicion(ed, torneo.id))}${fin?' · Finalizado':''}</span>
       <h2 class="section-title">Elegí la zona</h2>
-      <div class="zona-grid">
-        ${torneo.zonas.map(z=>`
-          <button class="zona-btn" onclick="enterZona('${torneo.id}','${z.id}')"><span>${escapeHtml(z.nombre)}</span><span class="tag">Ver →</span></button>
-        `).join('')}
-      </div>
+      <div class="zona-grid">${tarjetas}</div>
     </div>`;
 }
 
@@ -1341,7 +1462,7 @@ function renderTorneoView(){
   app.innerHTML = `
     ${renderTopbar(titulo, true, backAction)}
     <div class="wrap section">
-      <span class="ed-chip ${ed.cerrada?'fin':''}">${escapeHtml(nombreEdicion(ed, torneo.id))}${ed.cerrada?' · Finalizado (solo lectura)':''}</span>
+      <span class="ed-chip ${torneoCerrado(ed, torneo.id)?'fin':''}">${escapeHtml(nombreEdicion(ed, torneo.id))}${torneoCerrado(ed, torneo.id)?' · Finalizado (solo lectura)':''}</span>
       ${tabs}
       ${body}
     </div>`;
@@ -1607,6 +1728,7 @@ function render(){
   }catch(e){}
   await loadCampeones();
   render();
+  precargarEdicion(state.edicionId);
 })();
 </script>
 </body>
